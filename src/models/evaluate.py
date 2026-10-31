@@ -10,6 +10,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from scipy import stats
+from scipy.optimize import nnls
+from sklearn.linear_model import ElasticNetCV, RidgeCV
+from sklearn.model_selection import PredefinedSplit
 from rich import box
 from rich.console import Console
 from rich.markup import escape
@@ -55,6 +58,18 @@ def _write_predictions(path: Path, rows: list[dict[str, object]]) -> None:
             writer.writerows(rows)
     except OSError as exc:
         raise OSError(f"Cannot write predictions CSV to {path}: {exc}") from exc
+
+
+def _write_folds(path: Path, train_df: pl.DataFrame, folds: np.ndarray) -> None:
+    """Write each training molecule's fold to a new CSV, refusing to overwrite."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", newline="", encoding="utf-8") as stream:
+            train_df.select([c for c in ("Molecule_Name", "SMILES") if c in train_df.columns]).with_columns(
+                pl.Series("fold", folds.tolist())
+            ).write_csv(stream)
+    except OSError as exc:
+        raise OSError(f"Cannot write folds CSV to {path}: {exc}") from exc
 
 
 _MIN_LABEL_WIDTH = 4
@@ -109,6 +124,10 @@ def _evaluate_model(
 _ENSEMBLE_METHODS = {"average": np.mean, "min": np.min, "max": np.max}
 
 
+# Learned per-target weights over the models' out-of-fold predictions, as in stack.py.
+_STACKERS = ["nnls", "ridgecv", "elasticnetcv"]
+
+
 def _combine(predictions: list[np.ndarray], method: str) -> np.ndarray:
     """Reduce a list of equal-length prediction vectors to one with the ensemble method."""
     return _ENSEMBLE_METHODS[method](np.stack(predictions), axis=0)
@@ -152,6 +171,51 @@ def _collapse(members: list[dict], method: str) -> dict:
         "blind": _combine([m for g in members for m in g["blind"]], method) if members[0]["blind"] else None,
         "holdout": {k: _combine([m for g in members for m in g["holdout"][k]], method) for k in members[0]["holdout"]},
     }
+
+
+def _fit_stacker(
+    method: str, X: np.ndarray, y: np.ndarray, folds: np.ndarray,
+) -> tuple[np.ndarray, float, dict[str, float]]:
+    """Fit stacking weights on out-of-fold predictions X (rows x models); return weights, intercept and chosen hyperparameters.
+
+    Ridge and elastic-net pick their regularisation on the same folds the base models were held out on.
+    NNLS has no intercept and its weights are not constrained to sum to one.
+    """
+    if method == "nnls":
+        return nnls(X, y)[0], 0.0, {}
+    cv = PredefinedSplit(test_fold=folds)
+    if method == "ridgecv":
+        model = RidgeCV(alphas=[0.1, 1.0, 10.0], cv=cv, scoring="neg_mean_squared_error").fit(X, y)
+        return model.coef_, float(model.intercept_), {"alpha": float(model.alpha_)}
+    model = ElasticNetCV(l1_ratio=[0.1, 0.5, 0.9], cv=cv).fit(X, y)
+    return model.coef_, float(model.intercept_), {"alpha": float(model.alpha_), "l1_ratio": float(model.l1_ratio_)}
+
+
+def _stack(members: list[dict], y: np.ndarray, folds: np.ndarray, method: str) -> tuple[dict, np.ndarray, float, dict]:
+    """Stack collapsed models: fit on all out-of-fold predictions and apply to val and blind rows.
+
+    The stack's own held-out predictions are leave-one-fold-out (refit without fold k, predict fold k),
+    so its cross-validation metrics are not scored on rows its weights were fitted on.
+    """
+    X = np.empty((len(y), len(members)))
+    for k in members[0]["holdout"]:
+        X[folds == k] = np.column_stack([m["holdout"][k] for m in members])
+    weights, intercept, params = _fit_stacker(method, X, y, folds)
+
+    def apply(columns: list[np.ndarray]) -> np.ndarray:
+        return np.column_stack(columns) @ weights + intercept
+
+    holdout = {}
+    for k in members[0]["holdout"]:
+        rest = folds != k
+        w, b, _ = _fit_stacker(method, X[rest], y[rest], folds[rest])
+        holdout[k] = X[folds == k] @ w + b
+    out = {
+        "val": apply([m["val"] for m in members]),
+        "blind": apply([m["blind"] for m in members]) if members[0]["blind"] is not None else None,
+        "holdout": holdout,
+    }
+    return out, weights, intercept, params
 
 
 def _cv_metrics(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray) -> dict[str, float]:
@@ -303,6 +367,30 @@ def _print_results(results: list[tuple[str, str, str, dict[str, float]]], sort_b
     console.print(table)
 
 
+def _print_stacks(reports: list[tuple[str, str, str, list[str], np.ndarray, float, dict[str, float]]]) -> None:
+    """Print each stacker's per-model weights; share is the weight over the sum of absolute weights."""
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", title_style="bold", padding=(0, 1), pad_edge=False)
+    for column, justify in [("Isoform", "left"), ("Input", "left"), ("Model", "left"), ("Weight", "right"), ("Share", "right")]:
+        table.add_column(column, justify=justify, no_wrap=True)
+    notes = []
+    for i, (target, input_label, method, names, weights, intercept, params) in enumerate(reports):
+        iso = target.replace("_pIC50_direct_inhibition", "")
+        total = float(np.abs(weights).sum())
+        for j, (name, weight) in enumerate(zip(names, weights)):
+            share = f"{abs(weight) / total:.1%}" if total > 0 else "n/a"
+            table.add_row(
+                iso if j == 0 else "", escape(_short(input_label)) if j == 0 else "", escape(name),
+                f"{weight:.3f}" if weight else "[dim]0[/]", share,
+                end_section=j == len(names) - 1 and i < len(reports) - 1,
+            )
+        fitted = ", ".join(f"{k}={v:g}" for k, v in {"intercept": intercept, **params}.items())
+        notes.append(f"{iso}, {_short(input_label)}: {fitted}")
+    console.print(f"\n[dim]stacking weights[/]  [dim]method[/]={reports[0][2]}")
+    console.print(table)
+    for note in notes:
+        console.print(f"[dim]{escape(note)}[/]")
+
+
 def _print_correlations(target: str, preds: dict[tuple[str, str], dict[int, float]]) -> None:
     """Print an all-vs-all Pearson correlation matrix of validation predictions for one target.
 
@@ -378,10 +466,17 @@ def main() -> None:
     parser.add_argument(
         "--ensemble",
         default=None,
-        choices=list(_ENSEMBLE_METHODS),
+        choices=[*_ENSEMBLE_METHODS, *_STACKERS],
         help="How to combine predictions across folds (--nfolds), seeds (--nseeds) and, when several "
-        "--models are given, across models, which adds an ensemble row. Default: average whenever "
+        "--models are given, across models, which adds an ensemble row. nnls, ridgecv and elasticnetcv "
+        "instead learn per-target model weights from out-of-fold predictions (requires --nfolds; models "
+        "are still averaged over folds and seeds) and print the weights. Default: average whenever "
         "--nfolds or --nseeds is used",
+    )
+    parser.add_argument(
+        "--folds-out", type=Path,
+        help="Write the --nfolds fold of every training molecule to a new CSV (use results/); "
+        "creates parents, refuses existing files",
     )
     parser.add_argument(
         "--cv-filter",
@@ -452,7 +547,18 @@ def main() -> None:
         parser.error("--cv-filter requires --nfolds")
     if args.nseeds < 1:
         parser.error(f"--nseeds must be >= 1, got {args.nseeds}")
+    if args.folds_out is not None and args.nfolds is None:
+        parser.error("--folds-out requires --nfolds")
+    if args.ensemble in _STACKERS and args.nfolds is None:
+        parser.error(f"--ensemble {args.ensemble} requires --nfolds (it is fitted on out-of-fold predictions)")
+    if args.ensemble in ("ridgecv", "elasticnetcv") and args.nfolds < 3:
+        parser.error(
+            f"--ensemble {args.ensemble} requires --nfolds >= 3: it picks its regularisation on the folds, "
+            "and its own cross-validation refits it with one fold left out"
+        )
     method = args.ensemble or "average"
+    # Stackers only replace the across-model step; models are still averaged over folds and seeds.
+    member_method = method if method in _ENSEMBLE_METHODS else "average"
     seeds: list[int | None] = [None] if args.nseeds == 1 else [args.seed + i for i in range(args.nseeds)]
 
     if not 0.0 < args.val_split < 1.0:
@@ -462,6 +568,14 @@ def main() -> None:
     if args.predictions_out is not None and args.predictions_out.exists():
         print(
             f"Cannot write predictions CSV to {args.predictions_out}: file already exists "
+            "(checked before training; choose a new path or delete it)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args.folds_out is not None and args.folds_out.exists():
+        print(
+            f"Cannot write folds CSV to {args.folds_out}: file already exists "
             "(checked before training; choose a new path or delete it)",
             file=sys.stderr,
         )
@@ -499,10 +613,18 @@ def main() -> None:
             print(str(exc), file=sys.stderr)
             sys.exit(1)
         print(f"cv_folds(cv_split={args.cv_split!r}, nfolds={args.nfolds}): fold sizes {np.bincount(folds).tolist()}", file=sys.stderr)
+        if args.folds_out is not None:
+            try:
+                _write_folds(args.folds_out, train_df, folds)
+            except OSError as exc:
+                print(str(exc), file=sys.stderr)
+                sys.exit(1)
+            print(f"Wrote {len(folds)} fold assignments to {args.folds_out}", file=sys.stderr)
 
     results: list[tuple[str, str, str, dict[str, float]]] = []
     cv_results: list[tuple[str, str, str, dict[str, float]]] = []
     prediction_rows: list[dict[str, object]] = []
+    stack_reports: list[tuple[str, str, str, list[str], np.ndarray, float, dict[str, float]]] = []
     # target -> (model, input) -> {val row index: prediction}
     corr_preds: dict[str, dict[tuple[str, str], dict[int, float]]] = {}
     blind_df = pl.read_csv(args.data_dir / "test.csv") if args.predict_blind else None
@@ -536,7 +658,7 @@ def main() -> None:
             collapsed = [
                 (cls.name, _collapse([_fit_members(
                     cls, X_train, y_train, X_val, blind_features if blind_df is not None else None, fold_ids, seeds,
-                )], method))
+                )], member_method))
                 for cls in model_classes
             ]
             if len(collapsed) > 1 and (args.ensemble or folds is not None or args.nseeds > 1):
@@ -558,12 +680,17 @@ def main() -> None:
                             + (f", dropped {dropped}" if dropped else ""),
                             file=sys.stderr,
                         )
-                as_members = [
-                    {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
-                     "holdout": {k: [v] for k, v in c["holdout"].items()}}
-                    for _, c in members
-                ]
-                collapsed.append((f"ensemble[{method}]", _collapse(as_members, method)))
+                if method in _STACKERS:
+                    stacked, weights, intercept, params = _stack([c for _, c in members], y_train, fold_ids, method)
+                    stack_reports.append((target, input_label, method, [n for n, _ in members], weights, intercept, params))
+                    collapsed.append((f"ensemble[{method}]", stacked))
+                else:
+                    as_members = [
+                        {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
+                         "holdout": {k: [v] for k, v in c["holdout"].items()}}
+                        for _, c in members
+                    ]
+                    collapsed.append((f"ensemble[{method}]", _collapse(as_members, method)))
             for name, out in collapsed:
                 predictions = out["val"]
                 metrics = _compute_metrics(pl.Series("actual", y_val.tolist()), pl.Series("prediction", predictions.tolist()))
@@ -625,6 +752,8 @@ def main() -> None:
             "  [dim](metrics averaged over held-out folds of the training portion)[/]"
         )
         _print_results(cv_results, args.sort_by)
+    if stack_reports:
+        _print_stacks(stack_reports)
     if args.correlation:
         for target, preds in corr_preds.items():
             if len(preds) < 2:

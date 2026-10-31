@@ -170,8 +170,8 @@ def _cv_metrics(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray
     }
 
 
-# Same cutoff as validation.r_squared_filtering in the run-ensemble pipeline.
-_CV_FILTER_R2 = 0.3
+# Looser than validation.r_squared_filtering (0.3) in the run-ensemble pipeline.
+_CV_FILTER_R2 = 0.15
 
 
 def _oof_r2(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray) -> float:
@@ -388,7 +388,7 @@ def main() -> None:
         default=None,
         choices=["r2"],
         help="Drop models from the multi-model ensemble row per target when their seed-averaged out-of-fold "
-        f"R² is below {_CV_FILTER_R2} (as in run-ensemble). Requires --nfolds and several --models. "
+        f"R² is below {_CV_FILTER_R2}. Requires --nfolds and several --models. "
         "If no model passes, all are kept with a warning. Default: no filtering",
     )
     parser.add_argument("--models", nargs="+", default=["all"], help="Model names to evaluate, or 'all'")

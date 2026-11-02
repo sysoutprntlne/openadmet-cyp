@@ -15,6 +15,23 @@ so stages can have different heads and even different task types).
   # pretrain on stability, then train on the challenge plus auxiliary heads
   train-model --model chemprop --stage tdc_hlm tdc_rlm --stage admet pubchem:CYP1A2 bindingdb:CYP2C8
 
+  # the same with --pretrain/--finetune (repeat --pretrain for several pretraining stages)
+  train-model --model chemprop --pretrain tdc_hlm tdc_rlm --finetune admet pubchem:CYP1A2
+
+Per-stage options take one value per stage (or one value for all): --stage-epochs,
+--stage-warmup-epochs, --stage-max-lr, --stage-lr-warmup-shape, --stage-lr-decay,
+--stage-freeze-epochs, --stage-loss. Freeze the encoder while the fresh head settles
+(then thaw it for the rest of the stage):
+
+  train-model --model chemprop --pretrain tdc_hlm --finetune admet \\
+      --stage-epochs 30 50 --stage-freeze-epochs 0 10 --stage-warmup-epochs 2 5 --stage-lr-warmup-shape linear cosine
+
+Sweep encoder size (the head is thrown away when the encoder is used as features):
+--hidden-dims, --depths, --mpn-dropouts take several values; every combination
+trains (x seeds). Later stages inherit the first stage's encoder size.
+Extra flags (--huber-delta, --label-noise, --label-shrink, --lr-decay, --mpn-dropout,
+--ffn-dropout, ...) are described in models.chemprop_ext.
+
 Only the datasets you list train ('admet' is the ADMET labels); the last stage is
 evaluated on the pinned split. Earlier stages train on molecules in the pinned
 train split only, so no val/test molecule is seen during pretraining; they use
@@ -49,7 +66,9 @@ def build_command(
 ) -> list[str]:
     """Build the `chemprop train` argv for the given dataset and targets."""
     cmd = [
-        "chemprop",
+        sys.executable,
+        "-m",
+        "models.chemprop_ext",
         "train",
         "--data-path",
         str(data_path),
@@ -82,6 +101,26 @@ def find_best_model(output_dir: Path) -> Path:
     return found[0]
 
 
+# per-stage flag lists: argparse dest -> the chemprop(_ext) flag it sets in that stage
+STAGE_FLAGS = {
+    "stage_warmup_epochs": "--warmup-epochs",
+    "stage_max_lr": "--max-lr",
+    "stage_lr_warmup_shape": "--lr-warmup-shape",
+    "stage_lr_decay": "--lr-decay",
+    "stage_freeze_epochs": "--freeze-epochs",
+}
+
+
+def stage_flags(args: argparse.Namespace, index: int, n_stages: int) -> list[str]:
+    """Flags for stage `index` from the --stage-* lists (one value per stage, or one for all)."""
+    flags: list[str] = []
+    for dest, flag in STAGE_FLAGS.items():
+        values = getattr(args, dest, None)
+        if values:
+            flags += [flag, values[index if len(values) > 1 else 0]]
+    return flags
+
+
 def _with_loss(loss_function: str | None, task_type: str) -> list[str]:
     """Loss flag for a stage; only regression stages take --loss-function."""
     return ["--loss-function", loss_function] if loss_function and task_type == "regression" else []
@@ -109,6 +148,30 @@ class ChempropBackend(Backend):
             "Name 'admet' in a stage to train on the ADMET labels there.",
         )
         parser.add_argument(
+            "--pretrain",
+            nargs="+",
+            action="append",
+            default=None,
+            metavar="NAME[:ISO,ISO]",
+            help="Pretraining stage (repeat for several); use with --finetune. Shorthand for --stage.",
+        )
+        parser.add_argument(
+            "--finetune",
+            nargs="+",
+            default=None,
+            metavar="NAME[:ISO,ISO]",
+            help="Final, evaluated stage after the --pretrain stages. Shorthand for the last --stage.",
+        )
+        for dest, flag in STAGE_FLAGS.items():
+            parser.add_argument(
+                "--" + dest.replace("_", "-"), nargs="+", default=None,
+                help=f"{flag} per stage, in order (one value applies to every stage)",
+            )
+        parser.add_argument("--stage-loss", nargs="+", default=None, help="--loss-function per stage (default: --loss-function)")
+        parser.add_argument("--hidden-dims", nargs="+", type=int, default=None, help="Sweep --message-hidden-dim (encoder width)")
+        parser.add_argument("--depths", nargs="+", type=int, default=None, help="Sweep --depth (message-passing steps)")
+        parser.add_argument("--mpn-dropouts", nargs="+", type=float, default=None, help="Sweep message-passing dropout")
+        parser.add_argument(
             "--stage-epochs",
             nargs="+",
             type=int,
@@ -128,7 +191,21 @@ class ChempropBackend(Backend):
             "path to a local model file. Later stages start from the previous stage instead.",
         )
 
+    def variants(self, args: argparse.Namespace) -> list[dict[str, object]]:
+        """Encoder-size sweep: one dict per (hidden dim, depth, dropout) combination."""
+        grid = [{}]
+        for dest, values in (("hidden_dim", args.hidden_dims), ("depth", args.depths), ("mpn_dropout", args.mpn_dropouts)):
+            grid = [{**g, dest: v} for g in grid for v in values or [None] if v is not None or not values]
+        return [{k: v for k, v in g.items() if v is not None} for g in grid]
+
     def validate(self, args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+        if args.pretrain is not None or args.finetune is not None:
+            if args.stage is not None or args.datasets is not None:
+                parser.error("--pretrain/--finetune replace --stage and --datasets; use one style")
+            if not args.finetune:
+                parser.error("--pretrain needs --finetune")
+            args.stage = [*(args.pretrain or []), args.finetune]
+            args.pretrain = args.finetune = None
         if args.datasets is not None and args.stage is not None:
             parser.error("--datasets and --stage are alternatives; use --stage once per stage")
         stage_specs = [args.datasets] if args.datasets is not None else args.stage
@@ -136,12 +213,23 @@ class ChempropBackend(Backend):
             parser.error("pass exactly one of --data-path, --datasets or --stage")
         if args.data_path is not None and not args.target_columns:
             parser.error("--target-columns is required with --data-path")
-        if args.stage_epochs is not None and stage_specs is not None and len(args.stage_epochs) != len(stage_specs):
-            parser.error(f"--stage-epochs needs one value per stage ({len(stage_specs)})")
+        if stage_specs is not None:
+            for dest in ["stage_epochs", "stage_loss", *STAGE_FLAGS]:
+                values = getattr(args, dest, None)
+                if values is not None and len(values) not in (1, len(stage_specs)):
+                    parser.error(f"--{dest.replace('_', '-')} needs one value per stage ({len(stage_specs)}) or a single value")
 
     def run(self, args: argparse.Namespace, extra_args: list[str]) -> int:
         parser = args.parser
         stage_specs = [args.datasets] if args.datasets is not None else args.stage
+        sweep = getattr(args, "variant", None) or {}
+        sweep_flags = []
+        if "hidden_dim" in sweep:
+            sweep_flags += ["--message-hidden-dim", str(sweep["hidden_dim"])]
+        if "depth" in sweep:
+            sweep_flags += ["--depth", str(sweep["depth"])]
+        if "mpn_dropout" in sweep:
+            sweep_flags += ["--mpn-dropout", str(sweep["mpn_dropout"])]
 
         if shutil.which("chemprop") is None:
             print("chemprop CLI not found on PATH. Install it with: pip install chemprop", file=sys.stderr)
@@ -153,7 +241,7 @@ class ChempropBackend(Backend):
             output_dir.mkdir(parents=True, exist_ok=True)
             cmd = build_command(
                 args.data_path, args.smiles_column, args.target_columns, output_dir, args.epochs, args.seed,
-                args.from_foundation, _with_loss(args.loss_function, "regression") + extra_args,
+                args.from_foundation, _with_loss(args.loss_function, "regression") + sweep_flags + extra_args,
             )
             print(f"Running: {' '.join(cmd)}", file=sys.stderr)
             return subprocess.run(cmd, check=False).returncode
@@ -203,10 +291,17 @@ class ChempropBackend(Backend):
                 file=sys.stderr,
             )
 
-            epochs = args.stage_epochs[index] if args.stage_epochs else args.epochs
+            def per_stage(values, default):
+                return default if not values else values[index if len(values) > 1 else 0]
+
+            epochs = int(per_stage(args.stage_epochs, args.epochs))
+            loss = per_stage(args.stage_loss, args.loss_function)
+            # later stages start from the previous encoder, so only stage 1 takes the size flags
+            sizing = sweep_flags if index == 0 else [f for pair in zip(sweep_flags[::2], sweep_flags[1::2]) if pair[0] == "--mpn-dropout" for f in pair]
+            extra = stage_flags(args, index, n_stages) + sizing + extra
             cmd = build_command(
                 data_path, args.smiles_column, target_columns, stage_dir, epochs, args.seed, foundation,
-                _with_loss(args.loss_function, task_type) + extra, task_type,
+                _with_loss(loss, task_type) + extra, task_type,
             )
             print(f"Running: {' '.join(cmd)}", file=sys.stderr)
             code = subprocess.run(cmd, check=False).returncode

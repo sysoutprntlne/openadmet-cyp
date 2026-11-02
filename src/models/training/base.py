@@ -22,6 +22,10 @@ class Backend:
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """Add this backend's own flags to the shared parser."""
 
+    def variants(self, args: argparse.Namespace) -> list[dict[str, object]]:
+        """Extra sweep dimensions: one dict per combination, set on `args.variant` for each run."""
+        return [{}]
+
     def validate(self, args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
         """Reject flag combinations that make no sense for this backend."""
 

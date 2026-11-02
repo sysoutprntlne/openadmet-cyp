@@ -69,27 +69,32 @@ def main(argv: list[str] | None = None, model: str | None = None) -> None:
         parser.error("pass --datasets (e.g. --datasets admet, or --datasets admet pubchem:CYP1A2); see --list-datasets")
     seeds = args.seeds or (list(range(args.seed, args.seed + args.n_seeds)) if args.n_seeds else [args.seed])
     lrs = args.learning_rate if hasattr(args, "learning_rate") else [None]  # only backends with the flag sweep it
-    runs = [(group, lr, seed) for group in args.datasets or [None] for lr in lrs for seed in seeds]
+    variants = backend.variants(args)  # e.g. encoder-size sweep; [{}] when the backend has none
+    runs = [(group, lr, variant, seed) for group in args.datasets or [None] for lr in lrs for variant in variants for seed in seeds]
     failed = []
-    for index, (group, lr, seed) in enumerate(runs, 1):
+    for index, (group, lr, variant, seed) in enumerate(runs, 1):
         run = copy.copy(args)
         run.seed = seed
         if lr is not None:
             run.learning_rate = lr
+        run.variant = variant
         run.use_admet = True
         run.run_label = _ADMET
         if group is not None:
             run.use_admet = _ADMET in group
             run.datasets = [t for t in group if t != _ADMET]
             run.run_label = slug(group)
+        tag = "_".join(f"{k}{v}" for k, v in variant.items())
+        if tag:
+            run.run_label = f"{run.run_label}_{tag}"
         if len(runs) > 1:
             base = args.output_dir or backend.results_dir
             run.output_dir = base / run.run_label / f"seed{seed}"
         backend.validate(run, parser)
-        print(f"\n##### run {index}/{len(runs)}: {run.run_label}{f' lr {lr}' if lr is not None else ''} seed {seed}", file=sys.stderr)
+        print(f"\n##### run {index}/{len(runs)}: {run.run_label}{f' lr {lr}' if lr is not None else ''}{f' {variant}' if variant else ''} seed {seed}", file=sys.stderr)
         code = backend.run(run, extra)
         if code != 0:
-            failed.append(f"{run.run_label} lr {lr} seed {seed}")
+            failed.append(f"{run.run_label} lr {lr} {variant} seed {seed}")
     if failed:
         print(f"\n{len(failed)}/{len(runs)} runs failed: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)

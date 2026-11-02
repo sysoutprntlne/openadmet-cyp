@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#$ -P buaisociety
+#$ -N train_model
+#$ -j y
+#$ -o train_model.qlog
+#$ -l h_rt=12:00:00          # raise for big grids: qsub -l h_rt=48:00:00 scripts/train_model.qsub ...
+#$ -l gpus=1
+#$ -l gpu_c=8.0               # min compute capability: older GPUs lack kernels for our torch build (cudaErrorNoKernelImageForDevice)
+#$ -pe omp 4
+
+module load miniconda
+conda activate cyp
+
+cd "$SGE_O_WORKDIR"
+
+python -c "import omegaconf;from unimol_tools import UniMolRepr; print('Unimol Environment Successfully Found')"
+
+nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.get_arch_list())"
+
+# Data is gitignored; fetch it once on the cluster (skips files already present):
+#   download-data
+if [ ! -f data/train.csv ] || [ ! -d data/metabolism ]; then
+    echo "Missing data/. Run download-data first." >&2
+    exit 1
+fi
+
+# Extra args pass through to train-model (--model chemprop|chemeleon|unimol). One model is trained per
+# (--datasets config x --learning-rate x seed):
+#   qsub scripts/train_model.qsub --model unimol --n-seeds 3 --learning-rate 5e-5 2e-4 5e-4 \
+#        --datasets admet --datasets admet pubchem:CYP1A2 --datasets pubchem:CYP1A2
+#   qsub scripts/train_model.qsub --model chemeleon --datasets admet pubchem:CYP1A2 --loss-function mae
+train-model "$@"

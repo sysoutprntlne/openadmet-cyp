@@ -6,4 +6,13 @@ numpy
 tqdm
 matplotlib
 torch
-chemprop
+chemprop==2.2.3
+mordredcommunity
+xgboost
+tabpfn
+lightgbm
+rich
+scipy
+unimol_tools
+tblite
+dimorphite-dl>=1.3

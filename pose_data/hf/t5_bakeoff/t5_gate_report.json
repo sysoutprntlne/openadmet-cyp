@@ -1,0 +1,30 @@
+{
+ "compounds": 200,
+ "isoforms": [
+  "CYP2D6",
+  "CYP3A4"
+ ],
+ "method": "protenix_v2@openprotein",
+ "attempted": 400,
+ "completed": 400,
+ "completion_rate": 1.0,
+ "by_isoform": {
+  "CYP2D6": {
+   "attempted": 200,
+   "completion_rate": 1.0,
+   "valid_rate": 0.97,
+   "coordinating_rate": 0.285
+  },
+  "CYP3A4": {
+   "attempted": 200,
+   "completion_rate": 1.0,
+   "valid_rate": 0.915,
+   "coordinating_rate": 0.41
+  }
+ },
+ "validity_failures": {
+  "severe steric overlap (N A into vdW)": 23
+ },
+ "gate_item_3_downstream_rmse": "NOT ANSWERED - requires the activity model (T6)",
+ "manifest": "data\\processed\\t5_bakeoff\\t5_manifest.csv"
+}

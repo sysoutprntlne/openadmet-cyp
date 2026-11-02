@@ -1,6 +1,79 @@
+﻿# Private challenge data, generated predictions, and submission packages
+# RULES.md: data, results, checkpoints, predictions, and credentials stay out of Git.
 data/
 results/
+submissions/
+submission/
+predictions/
+artifacts/
+checkpoints/
+weights/
+private/
+confidential/
+*.csv
+*.tsv
+*.parquet
+*.arrow
+*.feather
+*.sdf
+*.sdf.gz
+*.smi
+*.smiles
+*submission*.zip
+*submission*.tar
+*submission*.tar.gz
+
+# Local foundation-model path aliases
+foundation-path-alias.csv
+
+# Cached features and serialized models, including custom output locations
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+
+# Local credentials and authentication caches
+.env
+.env.*
+!.env.example
+!.env.template
+.aws/
+.ssh/
+.huggingface/
+.chemprop/
+.tabpfn/
+credentials
+credentials.*
+secrets/
+secrets.*
+*.pem
+*.key
+*.p12
+*.pfx
+hf_token
+tabpfn_token
+.token
+.token.*
+
+# Python environments and local test caches
 *.egg-info/
 __pycache__/
+*.py[cod]
 .venv/
 .env
+.DS_Store
+.vscode/
+*.zip
+
+# Stray model checkpoints (literal ~ dir)
+/~/
+.chemeleon/
+
+# unimol_tools run logs
+logs/

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
-from data_tools.inputs import INPUT_REGISTRY, featurize
+from data_tools.inputs import INPUT_REGISTRY, featurize, is_known_input
 from models import REGISTRY
 from models.utils import drop_nan_rows
 
@@ -32,7 +32,7 @@ def _generate_separate(
     """Fit one model per isoform (sharing one feature matrix), predict on test, write one combined submission CSV."""
     if model_name not in REGISTRY:
         raise ValueError(f"Unknown model: {model_name!r}. Available: {list(REGISTRY.keys())}")
-    unknown = [n for n in input_names if n not in INPUT_REGISTRY]
+    unknown = [n for n in input_names if not is_known_input(n)]
     if unknown:
         raise ValueError(f"Unknown input(s): {unknown}. Available: {list(INPUT_REGISTRY.keys())}")
 

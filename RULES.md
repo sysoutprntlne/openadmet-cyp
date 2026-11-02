@@ -1,7 +1,7 @@
 # Contributing Rules — OpenADMET CYP Inhibition Challenge
 
 Rules for working in this repo as part of the BU AI & ML (BUAIS) team effort.
-Read `tasks/MANIFEST.md` first — it holds the scientific contract (metric, split,
+Read `tasks/round1/MANIFEST.md` first — it holds the scientific contract (metric, split,
 join keys, file ownership). This file covers process: what a PR should look like,
 what you may and may not submit externally, and how to use AI tooling.
 
@@ -13,7 +13,7 @@ copy what it does.
 
 ## 1. Before you write code
 
-- **Claim a task.** Pick one of T1–T8 from `tasks/MANIFEST.md`, say so in the group
+- **Claim a task.** Pick one of T1–T8 from `tasks/round1/MANIFEST.md`, say so in the group
   chat, and read that task's file in full. The tasks are scoped for disjoint file
   ownership; picking one is what keeps merges clean.
 - **Branch off `main`**, named `<type>/<short-slug>` — `feat/`, `fix/`, `docs/`,
@@ -86,7 +86,7 @@ PR — write it up in `reports/` and say so.
   source — the tables there are the API surface for everyone else.
 - Longer findings go in `reports/` as markdown, in the style of
   `reports/head_search_analysis.md`.
-- Tick your task's box in `tasks/MANIFEST.md` when the workstream is actually done.
+- Tick your task's box in `tasks/round1/MANIFEST.md` when the workstream is actually done.
 
 ### Keep the diff clean
 

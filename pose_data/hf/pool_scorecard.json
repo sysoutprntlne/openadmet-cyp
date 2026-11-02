@@ -1,0 +1,150 @@
+[
+ {
+  "tag": "val87b",
+  "n_poses": 3360,
+  "n_ligands": 87,
+  "arms": {
+   "steered": {
+    "n_poses": 1620,
+    "n_ligands": 81,
+    "pool_oracle_lddt_pli": 0.6952,
+    "zhybrid_selected_lddt_pli": 0.5428,
+    "random_pose_lddt_pli": 0.555,
+    "selection_gap_to_oracle": 0.1524,
+    "mean_bisy_rmsd": 4.029,
+    "best_per_ligand_bisy_rmsd": 2.673,
+    "frac_poses_under_2A": 0.1864,
+    "frac_ligands_with_a_sub2A_pose": 0.4815,
+    "frac_poses_valid": 0.9938,
+    "frac_poses_coordinated": 0.9025,
+    "frac_mapped": 1.0,
+    "fe_donor_dist_p": {
+     "p5": 2.117,
+     "p25": 2.192,
+     "p50": 2.223,
+     "p75": 2.264,
+     "p95": 5.466
+    },
+    "n_inside_coordination_window": 1462,
+    "engine_wins": {
+     "boltz2": 81
+    }
+   },
+   "unsteered": {
+    "n_poses": 1740,
+    "n_ligands": 87,
+    "pool_oracle_lddt_pli": 0.6975,
+    "zhybrid_selected_lddt_pli": 0.5706,
+    "random_pose_lddt_pli": 0.5929,
+    "selection_gap_to_oracle": 0.1269,
+    "mean_bisy_rmsd": 3.831,
+    "best_per_ligand_bisy_rmsd": 2.653,
+    "frac_poses_under_2A": 0.208,
+    "frac_ligands_with_a_sub2A_pose": 0.5287,
+    "frac_poses_valid": 0.9908,
+    "frac_poses_coordinated": 0.8414,
+    "frac_mapped": 1.0,
+    "fe_donor_dist_p": {
+     "p5": 2.121,
+     "p25": 2.198,
+     "p50": 2.229,
+     "p75": 2.278,
+     "p95": 5.889
+    },
+    "n_inside_coordination_window": 1464,
+    "engine_wins": {
+     "boltz2": 87
+    }
+   }
+  },
+  "steering_effect": {
+   "oracle_delta": -0.0023,
+   "selected_delta": -0.0278,
+   "coordination_rate_delta": 0.0611,
+   "sub2A_ligand_rate_delta": -0.0472,
+   "caveat": "Both arms carry the Cys442-SG to heme-FE bond, so 'unsteered' means heme-anchored but ligand-unconstrained, not unconstrained."
+  }
+ },
+ {
+  "tag": "chai87",
+  "n_poses": 870,
+  "n_ligands": 87,
+  "arms": {
+   "unsteered": {
+    "n_poses": 870,
+    "n_ligands": 87,
+    "pool_oracle_lddt_pli": 0.6625,
+    "zhybrid_selected_lddt_pli": 0.5343,
+    "random_pose_lddt_pli": 0.5237,
+    "selection_gap_to_oracle": 0.1282,
+    "mean_bisy_rmsd": 4.134,
+    "best_per_ligand_bisy_rmsd": 2.698,
+    "frac_poses_under_2A": 0.1276,
+    "frac_ligands_with_a_sub2A_pose": 0.3793,
+    "frac_poses_valid": 0.9862,
+    "frac_poses_coordinated": 0.808,
+    "frac_mapped": 1.0,
+    "fe_donor_dist_p": {
+     "p5": 2.104,
+     "p25": 2.213,
+     "p50": 2.286,
+     "p75": 2.38,
+     "p95": 5.499
+    },
+    "n_inside_coordination_window": 703,
+    "engine_wins": {
+     "boltz2": 87
+    }
+   }
+  }
+ },
+ {
+  "date": "2026-09-15",
+  "what": "P450 generalisation, 17th measurement (pool deepened by 104 poses)",
+  "poses": 5552,
+  "pairs": 430,
+  "proteins": 81,
+  "pool_mean_all": 0.6834,
+  "oracle_all": 0.7925,
+  "random": 0.7117,
+  "selected": 0.7475,
+  "oracle": 0.7691,
+  "gain": 0.0358,
+  "null_p99": 0.0082,
+  "empirical_p": 0.0,
+  "catastrophic_frac": 0.0407,
+  "proteins_positive": "26/30",
+  "note": "reproduces +0.0357 at +0.0358 with nothing tuned; catastrophe rate 4.07%"
+ },
+ {
+  "date": "2026-09-15",
+  "what": "P450 generalisation, 18th measurement - SWEEP as reference (FINDING 016)",
+  "ref_source": "sweep",
+  "poses": 12134,
+  "pairs": 487,
+  "proteins": 87,
+  "construct_sequences": 181,
+  "random": 0.706,
+  "selected": 0.729,
+  "oracle": 0.7542,
+  "gain": 0.0229,
+  "null_p99": 0.0097,
+  "empirical_p": 0.0,
+  "catastrophic_frac": 0.0298,
+  "proteins_positive": "24/31",
+  "note": "coverage 487 pairs / 87 proteins vs esmfold2's 430 / 81; on the MATCHED 428 pairs sweep -0.0028 vs esmfold2, i.e. equivalent, not better - the +0.0078 seen at n=80 was noise and is retracted"
+ },
+ {
+  "date": "2026-09-16",
+  "what": "Reference DEPTH within-pair test (FINDING 016): 4 vs 8 sweep settings",
+  "pairs": 487,
+  "proteins": 87,
+  "gain_depth4": 0.0315,
+  "gain_depth8": 0.0345,
+  "delta": 0.003,
+  "noise_floor_95": 0.0138,
+  "median_depth": "4 -> 8",
+  "pairs_at_depth4": "479 -> 490",
+  "verdict": "saturated - doubling the reference is not measurably better; buy 4 settings"
+ }
+]

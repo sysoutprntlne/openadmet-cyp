@@ -1,0 +1,33 @@
+[morgan] appended 3924 molecules (cache now 3924 total)
+[morgan] appended 981 molecules (cache now 4905 total)
+Dropped 2832 of 3924 examples with non-finite features/target (train/CYP1A2_pIC50_direct_inhibition, morgan)
+Dropped 661 of 981 examples with non-finite features/target (val/CYP1A2_pIC50_direct_inhibition, morgan)
+Dropped 2891 of 3924 examples with non-finite features/target (train/CYP2C9_pIC50_direct_inhibition, morgan)
+Dropped 729 of 981 examples with non-finite features/target (val/CYP2C9_pIC50_direct_inhibition, morgan)
+Dropped 2718 of 3924 examples with non-finite features/target (train/CYP2D6_pIC50_direct_inhibition, morgan)
+Dropped 694 of 981 examples with non-finite features/target (val/CYP2D6_pIC50_direct_inhibition, morgan)
+Dropped 2056 of 3924 examples with non-finite features/target (train/CYP3A4_pIC50_direct_inhibition, morgan)
+Dropped 514 of 981 examples with non-finite features/target (val/CYP3A4_pIC50_direct_inhibition, morgan)
+isoform-mode=separate  input=morgan  split=scaffold  seed=42
+Isoform                         Model          Input       RMSE       MAE        R2
+------------------------------  -------------  ------  --------  --------  --------
+CYP1A2_pIC50_direct_inhibition  random_forest  morgan    0.9415    0.6908    0.1155
+CYP1A2_pIC50_direct_inhibition  lightgbm       morgan    0.9530    0.7099    0.0937
+CYP1A2_pIC50_direct_inhibition  xgboost        morgan    0.9574    0.7038    0.0853
+CYP1A2_pIC50_direct_inhibition  decision_tree  morgan    1.0700    0.7845   -0.1425
+CYP1A2_pIC50_direct_inhibition  ridge          morgan    1.4973    1.1617   -1.2370
+CYP2C9_pIC50_direct_inhibition  lightgbm       morgan    0.6912    0.5520    0.1596
+CYP2C9_pIC50_direct_inhibition  xgboost        morgan    0.7055    0.5542    0.1245
+CYP2C9_pIC50_direct_inhibition  random_forest  morgan    0.7244    0.5687    0.0769
+CYP2C9_pIC50_direct_inhibition  decision_tree  morgan    0.8273    0.6197   -0.2039
+CYP2C9_pIC50_direct_inhibition  ridge          morgan    1.0260    0.8162   -0.8517
+CYP2D6_pIC50_direct_inhibition  lightgbm       morgan    0.8368    0.6197    0.1407
+CYP2D6_pIC50_direct_inhibition  xgboost        morgan    0.8666    0.6441    0.0783
+CYP2D6_pIC50_direct_inhibition  random_forest  morgan    0.8740    0.6461    0.0626
+CYP2D6_pIC50_direct_inhibition  decision_tree  morgan    0.9450    0.6804   -0.0958
+CYP2D6_pIC50_direct_inhibition  ridge          morgan    1.4421    1.1210   -1.5521
+CYP3A4_pIC50_direct_inhibition  lightgbm       morgan    0.8505    0.6828    0.3463
+CYP3A4_pIC50_direct_inhibition  xgboost        morgan    0.8903    0.7167    0.2836
+CYP3A4_pIC50_direct_inhibition  random_forest  morgan    0.9151    0.7349    0.2431
+CYP3A4_pIC50_direct_inhibition  decision_tree  morgan    1.0292    0.8245    0.0427
+CYP3A4_pIC50_direct_inhibition  ridge          morgan    2.5643    2.0106   -4.9430

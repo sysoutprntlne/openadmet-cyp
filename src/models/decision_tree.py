@@ -37,3 +37,5 @@ class DecisionTree(CYPModel):
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         return self._model.predict(X)
+
+

@@ -4,7 +4,10 @@ import random
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import polars as pl
+
+from data_tools.split_column import _butina_groups, _scaffold_groups
 
 _DEFAULT_DATA_DIR = Path("data")
 
@@ -162,3 +165,43 @@ def load_data(
     if split_type == "butina":
         return _butina_split(df, val_fraction, seed, butina_cutoff)
     return _random_split(df, val_fraction, seed)
+
+
+def cv_folds(
+    df: pl.DataFrame,
+    *,
+    n_folds: int,
+    split_type: Literal["random", "scaffold", "butina"] = "random",
+    seed: int = 42,
+    butina_cutoff: float = 0.4,
+) -> np.ndarray:
+    """Return a fold index in [0, n_folds) for each row of df.
+
+    'scaffold' and 'butina' keep each scaffold family / cluster inside one fold;
+    'random' assigns rows independently. Groups are placed largest-first into the
+    currently smallest fold, so fold sizes stay balanced.
+    """
+    if n_folds < 2:
+        raise ValueError(f"n_folds must be >= 2, got {n_folds}")
+
+    smiles = df["SMILES"].to_list()
+    if split_type == "scaffold":
+        groups = list(_scaffold_groups(smiles).values())
+    elif split_type == "butina":
+        groups = list(_butina_groups(smiles, butina_cutoff).values())
+    else:
+        groups = [[idx] for idx in range(len(smiles))]
+
+    if len(groups) < n_folds:
+        raise ValueError(f"Only {len(groups)} {split_type} groups for {n_folds} folds")
+
+    random.Random(seed).shuffle(groups)
+    groups.sort(key=len, reverse=True)
+
+    fold_sizes = [0] * n_folds
+    folds = np.empty(len(smiles), dtype=int)
+    for rows in groups:
+        fold = min(range(n_folds), key=fold_sizes.__getitem__)
+        folds[rows] = fold
+        fold_sizes[fold] += len(rows)
+    return folds

@@ -1,4 +1,4 @@
-"""Download CYP challenge dataset splits from HuggingFace to a local data folder."""
+"""Download CYP challenge dataset splits, plus candidate metabolism datasets, from HuggingFace."""
 
 import argparse
 from pathlib import Path
@@ -19,6 +19,46 @@ _EMAX_TRAIN_FILE = "emax_train.csv"
 _SINGLE_CONC_TRAIN_FILE = "single_concentration_train.csv"
 
 _DEFAULT_DATA_DIR = Path("data")
+
+# Metabolism datasets, candidates for pretraining. Written as raw CSVs to
+# data/metabolism/{name}.csv. Compare their chemical overlap with the challenge
+# before choosing one; never merge them into the scored columns.
+#   name -> (hf path, what it is)
+_METABOLISM_DIR = "metabolism"
+_METABOLISM_DATASETS = {
+    "expansionrx": (
+        "hf://datasets/openadmet/openadmet-expansionrx-challenge-train-data/expansion_data_train.csv",
+        "ExpansionRx challenge train: HLM/MLM CLint plus LogD, KSOL, permeability, PPB (CC-BY-4.0)",
+    ),
+    "tdc_hlm": (
+        "hf://datasets/scikit-fingerprints/TDC_hlm/tdc_hlm.csv",
+        "TDC human liver microsomal stability, binary (6,013)",
+    ),
+    "tdc_rlm": (
+        "hf://datasets/scikit-fingerprints/TDC_rlm/tdc_rlm.csv",
+        "TDC rat liver microsomal stability, binary (5,590)",
+    ),
+    "tdc_clearance_microsome_az": (
+        "hf://datasets/scikit-fingerprints/TDC_clearance_microsome_az/tdc_clearance_microsome_az.csv",
+        "TDC AstraZeneca microsomal clearance, regression (1,102)",
+    ),
+    "tdc_half_life_obach": (
+        "hf://datasets/scikit-fingerprints/TDC_half_life_obach/tdc_half_life_obach.csv",
+        "TDC Obach drug half-life, regression (667)",
+    ),
+    "tdc_cyp2c9_substrate": (
+        "hf://datasets/scikit-fingerprints/TDC_cyp2c9_substrate_carbonmangels/tdc_cyp2c9_substrate_carbonmangels.csv",
+        "TDC CYP2C9 substrate, binary (about 670)",
+    ),
+    "tdc_cyp2d6_substrate": (
+        "hf://datasets/scikit-fingerprints/TDC_cyp2d6_substrate_carbonmangels/tdc_cyp2d6_substrate_carbonmangels.csv",
+        "TDC CYP2D6 substrate, binary (about 670)",
+    ),
+    "tdc_cyp3a4_substrate": (
+        "hf://datasets/scikit-fingerprints/TDC_cyp3a4_substrate_carbonmangels/tdc_cyp3a4_substrate_carbonmangels.csv",
+        "TDC CYP3A4 substrate, binary (670)",
+    ),
+}
 
 
 def _download_split(hf_path: str, local_path: Path) -> None:
@@ -69,7 +109,29 @@ def main() -> None:
         default=_DEFAULT_DATA_DIR / _SINGLE_CONC_TRAIN_FILE,
         help="Destination path for the single-concentration train CSV.",
     )
+    parser.add_argument(
+        "--metabolism",
+        nargs="*",
+        default=None,
+        choices=sorted(_METABOLISM_DATASETS),
+        metavar="NAME",
+        help="Metabolism datasets to download (default: all). Pass names to pick some: "
+        + ", ".join(_METABOLISM_DATASETS),
+    )
+    parser.add_argument("--no-metabolism", action="store_true", help="Skip the metabolism pretraining candidates.")
+    parser.add_argument("--list-metabolism", action="store_true", help="List the metabolism datasets and exit.")
+    parser.add_argument(
+        "--metabolism-dir",
+        type=Path,
+        default=_DEFAULT_DATA_DIR / _METABOLISM_DIR,
+        help="Destination directory for the metabolism CSVs.",
+    )
     args = parser.parse_args()
+
+    if args.list_metabolism:
+        for name, (_, description) in _METABOLISM_DATASETS.items():
+            print(f"{name:26s} {description}")
+        return
 
     if not args.no_train:
         _download_split(_HF_BASE + _HF_TRAIN, args.train_location)
@@ -85,6 +147,10 @@ def main() -> None:
 
     if not args.no_single_concentration:
         _download_split(_HF_BASE + _HF_SINGLE_CONC_TRAIN, args.single_concentration_location)
+
+    if not args.no_metabolism:
+        for name in args.metabolism or list(_METABOLISM_DATASETS):
+            _download_split(_METABOLISM_DATASETS[name][0], args.metabolism_dir / f"{name}.csv")
 
 
 if __name__ == "__main__":

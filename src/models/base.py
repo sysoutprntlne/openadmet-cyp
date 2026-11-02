@@ -6,6 +6,7 @@ from typing import ClassVar
 import numpy as np
 
 
+
 class CYPModel(ABC):
     """Base class for CYP challenge models.
 

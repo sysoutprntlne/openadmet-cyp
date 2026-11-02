@@ -1,0 +1,33 @@
+[rdkit] appended 3924 molecules (cache now 3924 total)
+[rdkit] appended 981 molecules (cache now 4905 total)
+Dropped 2832 of 3924 examples with non-finite features/target (train/CYP1A2_pIC50_direct_inhibition, rdkit)
+Dropped 661 of 981 examples with non-finite features/target (val/CYP1A2_pIC50_direct_inhibition, rdkit)
+Dropped 2891 of 3924 examples with non-finite features/target (train/CYP2C9_pIC50_direct_inhibition, rdkit)
+Dropped 729 of 981 examples with non-finite features/target (val/CYP2C9_pIC50_direct_inhibition, rdkit)
+Dropped 2718 of 3924 examples with non-finite features/target (train/CYP2D6_pIC50_direct_inhibition, rdkit)
+Dropped 694 of 981 examples with non-finite features/target (val/CYP2D6_pIC50_direct_inhibition, rdkit)
+Dropped 2056 of 3924 examples with non-finite features/target (train/CYP3A4_pIC50_direct_inhibition, rdkit)
+Dropped 514 of 981 examples with non-finite features/target (val/CYP3A4_pIC50_direct_inhibition, rdkit)
+isoform-mode=separate  input=rdkit  split=scaffold  seed=42
+Isoform                         Model          Input      RMSE       MAE        R2
+------------------------------  -------------  -----  --------  --------  --------
+CYP1A2_pIC50_direct_inhibition  random_forest  rdkit    0.9332    0.6879    0.1311
+CYP1A2_pIC50_direct_inhibition  lightgbm       rdkit    0.9530    0.7019    0.0937
+CYP1A2_pIC50_direct_inhibition  xgboost        rdkit    0.9550    0.7073    0.0900
+CYP1A2_pIC50_direct_inhibition  ridge          rdkit    1.0116    0.7066   -0.0212
+CYP1A2_pIC50_direct_inhibition  decision_tree  rdkit    1.0653    0.7651   -0.1325
+CYP2C9_pIC50_direct_inhibition  lightgbm       rdkit    0.6630    0.4924    0.2267
+CYP2C9_pIC50_direct_inhibition  random_forest  rdkit    0.6667    0.5046    0.2181
+CYP2C9_pIC50_direct_inhibition  xgboost        rdkit    0.6699    0.5044    0.2106
+CYP2C9_pIC50_direct_inhibition  decision_tree  rdkit    0.7460    0.5767    0.0209
+CYP2C9_pIC50_direct_inhibition  ridge          rdkit    0.7536    0.5099    0.0009
+CYP2D6_pIC50_direct_inhibition  random_forest  rdkit    0.8504    0.6191    0.1124
+CYP2D6_pIC50_direct_inhibition  xgboost        rdkit    0.8570    0.6241    0.0987
+CYP2D6_pIC50_direct_inhibition  ridge          rdkit    0.8597    0.6281    0.0929
+CYP2D6_pIC50_direct_inhibition  lightgbm       rdkit    0.8598    0.6459    0.0928
+CYP2D6_pIC50_direct_inhibition  decision_tree  rdkit    1.0802    0.7638   -0.4320
+CYP3A4_pIC50_direct_inhibition  xgboost        rdkit    0.7570    0.5759    0.4821
+CYP3A4_pIC50_direct_inhibition  ridge          rdkit    0.7678    0.5800    0.4671
+CYP3A4_pIC50_direct_inhibition  lightgbm       rdkit    0.7709    0.5865    0.4629
+CYP3A4_pIC50_direct_inhibition  random_forest  rdkit    0.7709    0.5867    0.4628
+CYP3A4_pIC50_direct_inhibition  decision_tree  rdkit    0.8722    0.6624    0.3124

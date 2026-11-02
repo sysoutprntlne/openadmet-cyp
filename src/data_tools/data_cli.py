@@ -1,16 +1,19 @@
 """CLI for the project's datasets: list them, fetch them (deriving the model-ready table), and alias them."""
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
 
+import polars as pl
 from rich import box
 from rich.console import Console
 from rich.table import Table
 
 from data_tools import dataset_alias
 from data_tools.datasets import Dataset, registry
+from data_tools.merge_datasets import SOURCES, Source
 
 console = Console()
 
@@ -38,6 +41,28 @@ def _status(dataset: Dataset, data_dir: Path) -> str:
     return "partial" if any(present) else "missing"
 
 
+def _natural(name: str) -> list:
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+def _isoforms(source: Source, data_dir: Path) -> list[str] | None:
+    """CYP isoforms a training source offers as `NAME:ISO`; None if its file is missing."""
+    path = data_dir / source.filename
+    if not path.is_file():
+        return None
+    if source.prepare is None:
+        columns = pl.read_csv(path, n_rows=0).columns
+    else:
+        columns = source.prepare(pl.read_csv(path, infer_schema_length=None)).columns
+    found = {
+        match.group(1)
+        for column in columns
+        for pattern, _ in source.heads
+        if (match := re.match(pattern, column)) and re.fullmatch(r"CYP\w+", match.group(1))
+    }
+    return sorted(found, key=_natural)
+
+
 def _list(args: argparse.Namespace, datasets: dict[str, Dataset]) -> None:
     aliases: dict[str, list[str]] = {}
     for alias, name in dataset_alias.load_aliases().items():
@@ -46,20 +71,31 @@ def _list(args: argparse.Namespace, datasets: dict[str, Dataset]) -> None:
     table = Table(box=box.SIMPLE_HEAD)
     for column in ("dataset", "alias", "group", "status", "rows", "size"):
         table.add_column(column, justify="right" if column in ("rows", "size") else "left", no_wrap=True)
-    table.add_column("description", overflow="ellipsis", no_wrap=True, max_width=45)
+    table.add_column("description", overflow="ellipsis", no_wrap=True, max_width=40)
+    table.add_column("train as", no_wrap=True)
+    table.add_column("isoforms", overflow="fold")
     for dataset in datasets.values():
         status = _status(dataset, args.data_dir)
         primary = args.data_dir / dataset.primary
         ready = primary.is_file()
-        table.add_row(
-            dataset.name,
-            ", ".join(sorted(aliases.get(dataset.name, []))),
-            dataset.group,
-            f"[green]{status}[/]" if status == "ready" else f"[yellow]{status}[/]" if status == "partial" else f"[dim]{status}[/]",
-            _rows(primary) if ready else "",
-            _size(primary) if ready else "",
-            dataset.description,
-        )
+        # Training sources (`--datasets NAME:ISO`) that read one of this dataset's files.
+        sources = [(n, src) for n, src in SOURCES.items() if src.filename in dataset.files] or [("-", None)]
+        for i, (train_name, source) in enumerate(sources):
+            isoforms = _isoforms(source, args.data_dir) if source is not None else []
+            first = i == 0
+            table.add_row(
+                dataset.name if first else "",
+                ", ".join(sorted(aliases.get(dataset.name, []))) if first else "",
+                dataset.group if first else "",
+                (f"[green]{status}[/]" if status == "ready" else f"[yellow]{status}[/]" if status == "partial" else f"[dim]{status}[/]")
+                if first
+                else "",
+                _rows(primary) if first and ready else "",
+                _size(primary) if first and ready else "",
+                dataset.description if first else "",
+                train_name,
+                "[dim]not fetched[/]" if isoforms is None else ", ".join(isoforms) if isoforms else "none",
+            )
     console.print(table)
 
 

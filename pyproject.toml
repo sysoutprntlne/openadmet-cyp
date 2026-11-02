@@ -31,7 +31,6 @@ write-descriptors = "data_tools.descriptors_out:main"
 dataset-similarity = "data_tools.dataset_similarity:main"
 representations = "data_tools.representations_cli:main"
 foundation-model = "models.foundation_model:main"
-run-ensemble = "models.run_ensemble:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

@@ -266,55 +266,42 @@ refuses to run without it.
 
 ## Ensembling
 
-The ensemble runner generates OOF and validation predictions, averages training
-seeds, filters candidates, combines highly correlated models, and fits one
-stacker per scored target. Choose `nnls`, `ridgecv`, or `elasticnetcv`.
-
-Input is a CSV with `SMILES`, the pinned `split` column (`train`, `val`, `test`),
-and the four `CYP{1A2,2C9,2D6,3A4}_pIC50_direct_inhibition` columns. Missing
-target labels are allowed. Preparation generates or verifies `inchikey_full`
-and `inchikey_block`: full keys distinguish rows, including stereoisomers;
-connectivity blocks keep related records together and must not cross splits.
-
-OOF folds use pinned training rows only. The config can create scaffold,
-Butina, or randomized connectivity-block folds, or load a saved CSV containing
-`inchikey_full,fold,oof_group`. The same assignments are used across models
-and seeds. Input data must not already contain `fold` or `oof_group` columns.
+`evaluate-models` ensembles across folds, seeds, models and inputs. Everything
+below needs `--nfolds` except plain averaging.
 
 ```bash
-# Optional: create development smoke-test data
-PYTHONPATH=src python scripts/prepare_ensemble_smoke.py
-
-# Run the ensemble workflow
-run-ensemble --config config/ensemble_smoke.json
+evaluate-models --models ridge random_forest lightgbm --input morgan --input rdkit \
+    --nfolds 5 --cv-split scaffold --nseeds 3 --ensemble nnls \
+    --folds-out results/folds_scaffold5.csv
 ```
 
-The config sets data/output paths, folds, at least three distinct training seeds,
-model configurations, and the stacker. Feature models must accept `random_state`.
-Output directories must be empty; the runner does not resume interrupted runs.
-For team comparisons, use the shared pinned dataset rather than the smoke split.
+- `--nfolds N`, `--cv-split random|scaffold|butina`: k-fold CV on the training
+  split; `--folds-out` saves each training molecule's fold to a new CSV.
+- `--nseeds N`: seed averaging per model (models without `random_state` train once).
+- `--ensemble average|min|max|nnls|ridgecv|elasticnetcv`: how models are combined into
+  an `ensemble[...]` row. The stackers learn per-target weights from out-of-fold
+  predictions (`ridgecv` and `elasticnetcv` need `--nfolds >= 3`), print the
+  weights, shares, intercept and chosen hyperparameters, and score the stack
+  with leave-one-fold-out refits. Models are still averaged over folds and seeds.
+- With several input sets (`--input` repeated), each target also gets an
+  `all inputs` ensemble over every (model, input) pair; `--no-input-ensemble`
+  turns that off.
+- `--cv-filter r2 RAE`: before ensembling, drop models whose out-of-fold R² is below
+  0.15 and models whose validation RAE is more than 2x their out-of-fold RAE
+  (the leakage check). If none pass, all are kept with a warning. This is the
+  default with `--nfolds`; `--cv-filter none` disables it.
+- Models whose validation predictions correlate above 0.95 (Pearson, complete
+  linkage) are averaged into one before ensembling; `--no-cv-deduplication`
+  disables this. It runs after the filters.
+- Every filter and deduplication decision is logged to stderr and summarised in an
+  `ensemble filters` table with each model's scores, kept/dropped status and cluster.
 
-Candidates must pass validation R² >= 0.3 and held-out/OOF RAE ratio <= 2.
-Complete-linkage clustering combines candidates with pairwise validation
-prediction correlations > 0.95; the same cluster membership averages their
-OOF predictions. Stacking weights are fitted on those OOF predictions.
-If any target has no survivors, `filter_decisions.csv` is saved and the run
-stops without fitting a stacker.
-
-Outputs include config, prepared data, folds, predictions/truth, filter decisions,
-cluster membership, `stack.json` (weights and fitted parameters), and
-`validation_metrics.csv`.
-
-For new molecules, reuse saved cluster membership and apply `predict_stack` to
-matching model/cluster predictions.
-Validation informs selection, so validation metrics are development results;
-the stacker's OOF-matrix fit metrics are not independent evaluation scores.
+Stackers are fitted only on out-of-fold predictions, never on predictions the base
+models saw in training. Validation informs selection, so validation metrics are
+development results.
 
 Chemprop can train jointly on additional auxiliary regression columns listed
 in `chemprop_config.target_columns`. Feature models do not automatically use
 auxiliary target columns, but can use auxiliary-trained checkpoint embeddings.
 Checkpoints must not have been trained on held-out labels. Record their resolved
 paths and hashes, keep weights immutable, and use fresh caches when changing them.
-
-The real-data smoke run stopped at filtering: its random forest failed R² for all
-four targets. Successful real-data stacking remains unverified.

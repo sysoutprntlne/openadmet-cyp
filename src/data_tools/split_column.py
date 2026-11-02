@@ -19,10 +19,8 @@ Grouping is by scaffold (default) or Butina cluster, so a scaffold family
 never straddles the split, which would leak structure between train and test.
 """
 
-import argparse
 import random
 import sys
-from pathlib import Path
 from typing import Literal
 
 import polars as pl
@@ -141,44 +139,3 @@ _SCORED_DEFAULT = [
     "CYP2D6_pIC50_direct_inhibition",
     "CYP3A4_pIC50_direct_inhibition",
 ]
-
-
-def main() -> None:
-    """Entry point for the add-split-column CLI."""
-    parser = argparse.ArgumentParser(
-        description="Add a fixed train/val/test split column to a multi-task table, so every "
-        "head-subset experiment trains and evaluates on identical molecules.",
-    )
-    parser.add_argument("--data-path", type=Path, default=Path("data/union_train.csv"), help="Table to annotate")
-    parser.add_argument("--output-path", type=Path, default=None, help="Output CSV (default: overwrite --data-path)")
-    parser.add_argument(
-        "--scored-columns",
-        nargs="+",
-        default=_SCORED_DEFAULT,
-        help="Columns that count as scored; only molecules with one of these can enter val/test",
-    )
-    parser.add_argument("--strategy", default="scaffold", choices=["scaffold", "butina", "random"])
-    parser.add_argument("--val-fraction", type=float, default=0.1)
-    parser.add_argument("--test-fraction", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--butina-cutoff", type=float, default=0.4)
-    args = parser.parse_args()
-
-    df = pl.read_csv(args.data_path, infer_schema_length=None)
-    splits = assign_splits(
-        df,
-        args.scored_columns,
-        strategy=args.strategy,
-        val_fraction=args.val_fraction,
-        test_fraction=args.test_fraction,
-        seed=args.seed,
-        butina_cutoff=args.butina_cutoff,
-    )
-    out = df.with_columns(splits)
-    dest = args.output_path or args.data_path
-    out.write_csv(dest)
-    print(f"Wrote {dest} with a {_SPLIT_COLUMN!r} column", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()

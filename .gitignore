@@ -25,6 +25,7 @@ confidential/
 
 # Local foundation-model path aliases
 foundation-path-alias.csv
+data-alias.csv
 
 # Cached features and serialized models, including custom output locations
 *.npy

@@ -1,6 +1,6 @@
 """Reshape per-protein P450 family datasets into per-protein auxiliary heads.
 
-`build-family-datasets` writes one CSV per protein with a single pooled
+`data fetch p450_family` writes one CSV per protein with a single pooled
 `pAffinity` column (see data_tools.family_datasets). That shape cannot enter
 the union table: every file would contribute a head named `pAffinity`, so two
 files collide, and the pooling hides IC50/Ki/Kd/EC50 from two databases inside
@@ -21,7 +21,6 @@ and mixing Ki/Kd/EC50 into one column reintroduces the pooling problem. Pass
 --affinity-types to widen, or --split-by-affinity-type to give each its own head.
 """
 
-import argparse
 import csv
 import sys
 from collections import defaultdict
@@ -30,8 +29,6 @@ from pathlib import Path
 import polars as pl
 
 _KEY = "inchikey_block"
-_DEFAULT_MANIFEST = Path("data/families/manifest.csv")
-_DEFAULT_OUT = Path("data/family_heads.csv")
 
 
 def select_proteins(
@@ -160,64 +157,26 @@ def build(
     return df, head_names
 
 
-def main() -> None:
-    """Entry point for the build-family-heads CLI."""
-    parser = argparse.ArgumentParser(
-        description="Pivot build-family-datasets output into per-protein auxiliary head columns "
-        "for the union table and head search.",
-    )
-    parser.add_argument("--manifest-path", type=Path, default=_DEFAULT_MANIFEST, help=f"default: {_DEFAULT_MANIFEST}")
-    parser.add_argument("--output-path", type=Path, default=_DEFAULT_OUT, help=f"default: {_DEFAULT_OUT}")
-    parser.add_argument(
-        "--organism",
-        default="Homo sapiens",
-        help="Keep only this organism (default: 'Homo sapiens'); pass '' for all",
-    )
-    parser.add_argument("--min-records", type=int, default=100, help="Skip proteins with fewer records (default: 100)")
-    parser.add_argument("--genes", nargs="*", default=None, help="Optional explicit gene allowlist, e.g. CYP2C8 CYP2B6")
-    parser.add_argument("--top-n", type=int, default=20, help="Keep at most this many proteins, richest first (default: 20)")
-    parser.add_argument(
-        "--affinity-types",
-        nargs="+",
-        default=["IC50"],
-        help="Affinity types to keep (default: IC50 only, matching the scored endpoint)",
-    )
-    parser.add_argument(
-        "--split-by-affinity-type",
-        action="store_true",
-        help="Give each affinity type its own head instead of one head per protein per source",
-    )
-    args = parser.parse_args()
+def write_heads(
+    manifest_path: Path,
+    output_path: Path,
+    organism: str | None = "Homo sapiens",
+    min_records: int = 100,
+    genes: list[str] | None = None,
+    top_n: int = 20,
+    affinity_types: tuple[str, ...] | list[str] = ("IC50",),
+    split_by_affinity_type: bool = False,
+) -> list[str]:
+    """Select proteins from the manifest, pivot them into head columns, write the CSV. Returns the head names.
 
-    if not args.manifest_path.exists():
-        print(f"Missing manifest: {args.manifest_path} (run build-family-datasets first)", file=sys.stderr)
-        sys.exit(1)
-
-    selected = select_proteins(
-        args.manifest_path,
-        args.organism or None,
-        args.min_records,
-        args.genes,
-        args.top_n,
-    )
+    Raises ValueError if no protein passes the filters or no usable record is found.
+    """
+    selected = select_proteins(manifest_path, organism, min_records, genes, top_n)
     if not selected:
-        print("No proteins passed the filters.", file=sys.stderr)
-        sys.exit(1)
-
-    df, head_names = build(args.manifest_path, selected, args.affinity_types, args.split_by_affinity_type)
+        raise ValueError("No proteins passed the filters.")
+    df, head_names = build(manifest_path, selected, list(affinity_types), split_by_affinity_type)
     if not head_names:
-        print("No usable records found.", file=sys.stderr)
-        sys.exit(1)
-
-    args.output_path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_csv(args.output_path)
-    print(f"\nWrote {args.output_path}", file=sys.stderr)
-    print("Add to the union with:", file=sys.stderr)
-    print(
-        f"  build-union --auxiliary pubchem=data/pubchem_aid1851.csv family={args.output_path}",
-        file=sys.stderr,
-    )
-
-
-if __name__ == "__main__":
-    main()
+        raise ValueError("No usable records found.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.write_csv(output_path)
+    return head_names

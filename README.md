@@ -18,14 +18,16 @@ python3 -m venv .venv
 ## Data
 
 ```bash
-download-data              # challenge splits (inhibition, TDI, Emax, single-concentration) from HuggingFace
-build-pubchem-aux          # PubChem AID 1851 (Veith CYP qHTS panel) -> per-isoform auxiliary heads
-build-union                # join challenge + auxiliary sources into one wide multi-task table
-check-overlap              # structural duplication within, and overlap between, any datasets
-build-family-datasets      # ChEMBL + BindingDB affinity data across the P450 family (Pfam PF00067)
-build-family-heads         # pivot the family datasets into one `{gene}_pIC50_{source}` head per protein per source
-add-split-column           # write the pinned train/val/test `split` column into the union table
+data list                  # every known dataset with status, rows, size
+data fetch NAME [NAME...]  # fetch by name or alias (or `all`), then derive the model-ready table
+data remove NAME           # delete a dataset's raw and derived files
+data alias NAME ALIAS      # short alias, stored in data-alias.csv
+download-data              # same as `data fetch all`
 ```
+
+Datasets are recipes in `src/data_tools/datasets.py`: a `fetch` step from the source and an optional `derive` step.
+`pubchem_aid1851` yields per-isoform auxiliary heads; `p450_family` (ChEMBL + BindingDB, Pfam PF00067) yields one
+`{gene}_pIC50_{source}` head per protein per source.
 
 ### External data as auxiliary heads
 
@@ -104,8 +106,7 @@ are masked in the loss. With several runs, outputs go to
 
 Chemprop-based models pass unknown flags (`--batch-size`, `--accelerator`,
 `--task-weights`, ...) through to `chemprop train`. To train on a ready table
-instead, `--data-path data/union_train.csv --target-columns <all heads>`
-(`build-union` prints the exact command with the head list filled in).
+instead, `--data-path data/union_train.csv --target-columns <all heads>`.
 `train-chemprop` and `train-unimol` remain as aliases for the matching
 `--model`. On SCC, `scripts/train_model.qsub` forwards its arguments to
 `train-model`. To add a model, write a `Backend` in
@@ -261,9 +262,8 @@ breaking the CLI. It is untuned and has not been run on CYP data yet.
 `butina` (Tanimoto cluster) train/val splits; `evaluate-models` exposes them as
 `--split` and `--seed`.
 
-Chemprop multi-task runs use a different mechanism: `add-split-column` writes
-one pinned `split` column into `data/union_train.csv`, and `head-search`
-refuses to run without it.
+Chemprop multi-task runs use a different mechanism: a pinned `split` column in
+`data/union_train.csv`, and `head-search` refuses to run without it.
 
 ## Ensembling
 

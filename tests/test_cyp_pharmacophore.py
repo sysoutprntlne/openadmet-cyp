@@ -296,7 +296,7 @@ def test_preexisting_registry_order_is_unchanged():
     assert list(INPUT_REGISTRY) == [
         "rdkit", "chemeleon", "morgan", "count_morgan", "maccs", "mordred", "shape", "unimol",
         "cyp_heme_v2", "cyp_isoform_v2", "cyp_tdi_v2", "erg",
-        "xtb_solv_v1", "xtb_elec_v1",
+        "xtb_solv_v1", "xtb_elec_v1", "cyp_mech_v1",
     ]
 
 

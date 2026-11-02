@@ -15,3 +15,4 @@ rich
 scipy
 unimol_tools
 tblite
+dimorphite-dl>=1.3

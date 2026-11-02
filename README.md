@@ -132,6 +132,7 @@ names below; several names are hstacked into one feature matrix.
 | `mordred` | `MordredDescriptors` | 1613 | Mordred 2D descriptors (`mordredcommunity`); missing values encoded as 0 |
 | `xtb_solv_v1` | `XTBSolvation` | 9 | GFN2-xTB (`tblite`) ALPB water/octanol solvation, xTB logP, heuristic logD at pH 7.4; slow, see note below |
 | `xtb_elec_v1` | `XTBElectronic` | 24 | Boltzmann-averaged GFN2-xTB FMO energies, charges, SASA, shape, flexibility; shares conformers with `xtb_solv_v1` |
+| `cyp_mech_v1` | `CYPMechanisticBlock` | 30 | Mechanistic block: N/acid group counts, rule-based pKa and pH 7.4 protonation state, basic-N-to-aryl topological distances, CYP2D6 pharmacophore flags. Ported from Lizard Wizard Gizzard, see Acknowledgements |
 
 The xTB blocks embed up to 10 ETKDG/MMFF conformers per molecule and run three
 xTB single points each. Cost is seconds per molecule, so the first run is the
@@ -305,3 +306,11 @@ in `chemprop_config.target_columns`. Feature models do not automatically use
 auxiliary target columns, but can use auxiliary-trained checkpoint embeddings.
 Checkpoints must not have been trained on held-out labels. Record their resolved
 paths and hashes, keep weights immutable, and use fresh caches when changing them.
+
+## Acknowledgements
+
+`cyp_mech_v1` (`src/representations/cyp_mech.py`) is ported from the open-code
+submission of the Lizard Wizard Gizzard team,
+[doctawho42/CYPChallenge](https://github.com/doctawho42/CYPChallenge) (MIT License,
+Copyright (c) 2026 the CYPChallenge contributors), at commit `bf018b8`. The SMARTS
+tables, pKa rule and column definitions are theirs; see `THIRD_PARTY_NOTICES.md`.

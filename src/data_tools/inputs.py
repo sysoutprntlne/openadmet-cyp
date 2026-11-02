@@ -22,6 +22,7 @@ from representations.shape import ShapeDescriptors
 from representations.unimol import UniMol
 from representations.unimol import cache_name as unimol_cache_name
 from representations.unimol import parse_spec as parse_unimol_spec
+from representations.cyp_mech import CYPMechanisticBlock
 from representations.cyp_xtb import XTBElectronic, XTBSolvation
 
 _rdkit = RDKitDescriptors()
@@ -38,6 +39,7 @@ _cyp_tdi = MechanismBasedAlerts()
 _erg = ErGFingerprint()
 _xtb_solv = XTBSolvation()
 _xtb_elec = XTBElectronic()
+_cyp_mech = CYPMechanisticBlock()
 
 
 def _shape_features(df: pl.DataFrame) -> np.ndarray:
@@ -94,6 +96,10 @@ def _xtb_elec_features(df: pl.DataFrame) -> np.ndarray:
     return _xtb_elec.transform(df["SMILES"])
 
 
+def _cyp_mech_features(df: pl.DataFrame) -> np.ndarray:
+    return _cyp_mech.transform(df["SMILES"])
+
+
 INPUT_REGISTRY: dict[str, Callable[[pl.DataFrame], np.ndarray]] = {
     _rdkit.name: _rdkit_features,
     _chemeleon.name: _chemeleon_features,
@@ -111,6 +117,8 @@ INPUT_REGISTRY: dict[str, Callable[[pl.DataFrame], np.ndarray]] = {
     # --- GFN2-xTB blocks (tblite; conformer ensembles, slow: the cache is essential) ---
     _xtb_solv.name: _xtb_solv_features,
     _xtb_elec.name: _xtb_elec_features,
+    # --- mechanistic block ported from Lizard Wizard Gizzard (see cyp_mech.py) ---
+    _cyp_mech.name: _cyp_mech_features,
 }
 
 

@@ -265,6 +265,48 @@ Chemprop multi-task runs use a different mechanism: `add-split-column` writes
 one pinned `split` column into `data/union_train.csv`, and `head-search`
 refuses to run without it.
 
+## Ensembling
+
+`evaluate-models` ensembles across folds, seeds, models and inputs. Everything
+below needs `--nfolds` except plain averaging.
+
+```bash
+evaluate-models --models ridge random_forest lightgbm --input morgan --input rdkit \
+    --nfolds 5 --cv-split scaffold --nseeds 3 --ensemble nnls \
+    --folds-out results/folds_scaffold5.csv
+```
+
+- `--nfolds N`, `--cv-split random|scaffold|butina`: k-fold CV on the training
+  split; `--folds-out` saves each training molecule's fold to a new CSV.
+- `--nseeds N`: seed averaging per model (models without `random_state` train once).
+- `--ensemble average|min|max|nnls|ridgecv|elasticnetcv`: how models are combined into
+  an `ensemble[...]` row. The stackers learn per-target weights from out-of-fold
+  predictions (`ridgecv` and `elasticnetcv` need `--nfolds >= 3`), print the
+  weights, shares, intercept and chosen hyperparameters, and score the stack
+  with leave-one-fold-out refits. Models are still averaged over folds and seeds.
+- With several input sets (`--input` repeated), each target also gets an
+  `all inputs` ensemble over every (model, input) pair; `--no-input-ensemble`
+  turns that off.
+- `--cv-filter r2 RAE`: before ensembling, drop models whose out-of-fold R² is below
+  0.15 and models whose validation RAE is more than 2x their out-of-fold RAE
+  (the leakage check). If none pass, all are kept with a warning. This is the
+  default with `--nfolds`; `--cv-filter none` disables it.
+- Models whose validation predictions correlate above 0.95 (Pearson, complete
+  linkage) are averaged into one before ensembling; `--no-cv-deduplication`
+  disables this. It runs after the filters.
+- Every filter and deduplication decision is logged to stderr and summarised in an
+  `ensemble filters` table with each model's scores, kept/dropped status and cluster.
+
+Stackers are fitted only on out-of-fold predictions, never on predictions the base
+models saw in training. Validation informs selection, so validation metrics are
+development results.
+
+Chemprop can train jointly on additional auxiliary regression columns listed
+in `chemprop_config.target_columns`. Feature models do not automatically use
+auxiliary target columns, but can use auxiliary-trained checkpoint embeddings.
+Checkpoints must not have been trained on held-out labels. Record their resolved
+paths and hashes, keep weights immutable, and use fresh caches when changing them.
+
 ## Acknowledgements
 
 `cyp_mech_v1` (`src/representations/cyp_mech.py`) is ported from the open-code

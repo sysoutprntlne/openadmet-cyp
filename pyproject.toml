@@ -13,25 +13,20 @@ requires-python = ">=3.10"
 dynamic = ["version", "dependencies"]
 
 [project.scripts]
-download-data = "data_tools.download:main"
+download-data = "data_tools.data_cli:download_all"
 evaluate-models = "models.evaluate:main"
 plot-results = "models.plot_results:main"
 generate-results = "models.predict:main"
 train-chemprop = "models.train_chemprop:main"
 train-unimol = "models.train_unimol:main"
 train-model = "models.train_model:main"
-build-family-datasets = "data_tools.family_datasets:main"
-build-pubchem-aux = "data_tools.pubchem:main"
-build-union = "data_tools.build_union:main"
-check-overlap = "data_tools.overlap:main"
-build-family-heads = "data_tools.family_heads:main"
-add-split-column = "data_tools.split_column:main"
 head-search = "models.head_search:main"
 motif-report = "data_tools.motif_report:main"
 write-descriptors = "data_tools.descriptors_out:main"
 dataset-similarity = "data_tools.dataset_similarity:main"
 representations = "data_tools.representations_cli:main"
 foundation-model = "models.foundation_model:main"
+data = "data_tools.data_cli:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

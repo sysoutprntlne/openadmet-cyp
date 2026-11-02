@@ -304,7 +304,7 @@ def main() -> None:
     df = pl.read_csv(args.data_path, infer_schema_length=None)
     if "split" not in df.columns:
         print(
-            f"{args.data_path} has no 'split' column. Run add-split-column first: comparing head "
+            f"{args.data_path} has no 'split' column. It needs a pinned split column: comparing head "
             "subsets across different random splits measures split noise, not head value.",
             file=sys.stderr,
         )

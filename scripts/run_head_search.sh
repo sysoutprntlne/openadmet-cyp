@@ -13,7 +13,7 @@ set -euo pipefail
 DATA_PATH="${DATA_PATH:-data/union_train.csv}"
 
 if [ ! -f "$DATA_PATH" ]; then
-    echo "Missing $DATA_PATH. Run build-union (and add-split-column) first." >&2
+    echo "Missing $DATA_PATH. It needs a union table with a pinned split column." >&2
     exit 1
 fi
 

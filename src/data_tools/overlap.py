@@ -14,10 +14,8 @@ Two questions this answers:
      our augmentation is leaking answers, which we can.
 """
 
-import argparse
 import statistics
 import sys
-from pathlib import Path
 
 import polars as pl
 
@@ -109,55 +107,3 @@ def collapse_duplicates(
     other = [c for c in df.columns if c not in present + ["SMILES", key]]
     aggs += [pl.col(c).first() for c in other]
     return df.group_by(key, maintain_order=True).agg(aggs).select([key, "SMILES"] + present + other)
-
-
-def main() -> None:
-    """Entry point for the check-overlap CLI."""
-    parser = argparse.ArgumentParser(
-        description="Report structural duplication within, and overlap between, datasets "
-        "(keyed on InChIKey connectivity block).",
-    )
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        required=True,
-        metavar="NAME=PATH",
-        help="Datasets to compare, e.g. train=data/train.csv test=data/test.csv pubchem=data/pubchem_aid1851.csv",
-    )
-    parser.add_argument("--smiles-column", default="SMILES", help="SMILES column name (default: SMILES)")
-    parser.add_argument(
-        "--target-columns",
-        nargs="+",
-        default=[],
-        help="Label columns to report duplicate spread for (optional)",
-    )
-    args = parser.parse_args()
-
-    frames: dict[str, pl.DataFrame] = {}
-    for spec in args.datasets:
-        if "=" not in spec:
-            print(f"--datasets entries must be NAME=PATH, got {spec!r}", file=sys.stderr)
-            sys.exit(1)
-        name, _, path_text = spec.partition("=")
-        path = Path(path_text)
-        if not path.exists():
-            print(f"Missing dataset file: {path}", file=sys.stderr)
-            sys.exit(1)
-        print(f"Keying {name} <- {path}", file=sys.stderr)
-        # infer_schema_length=None: sparse label columns that are null for the
-        # first 100 rows would otherwise be typed String.
-        frames[name] = add_keys(pl.read_csv(path, infer_schema_length=None), args.smiles_column)
-
-    print("\n=== duplication within each dataset ===")
-    for name, df in frames.items():
-        duplication_report(df, name, args.target_columns)
-
-    print("\n=== pairwise overlap ===")
-    names = list(frames)
-    for i, left in enumerate(names):
-        for right in names[i + 1 :]:
-            overlap_report(frames[left], frames[right], left, right)
-
-
-if __name__ == "__main__":
-    main()

@@ -30,7 +30,7 @@ from typing import Callable
 import polars as pl
 
 from data_tools.overlap import add_keys, add_stereo_keys, collapse_duplicates, overlap_report
-from data_tools.split_column import assign_splits
+from data_tools.split_column import _SPLIT_COLUMN, assign_blindlike_splits, assign_splits
 
 _KEY = "inchikey_block"
 _STEREO_KEY = "inchikey_full"
@@ -257,14 +257,35 @@ def merge(
     # Stereoisomers are different molecules: collapse on the full InChIKey, not the skeleton.
     table = collapse_duplicates(table, heads, key=_STEREO_KEY).sort(_STEREO_KEY)
 
-    splits = assign_splits(
-        table,
-        scored,
-        strategy=split_strategy,  # type: ignore[arg-type]
-        val_fraction=val_fraction,
-        test_fraction=test_fraction,
-        seed=split_seed,
-    )
+    if split_strategy == "blind_matched":
+        # The held-out slices imitate the blind set's regime instead of holding out
+        # whole scaffold families. The blind molecules themselves are the reference,
+        # so this needs test_path. Opt-in only: the default stays `scaffold`, which
+        # is the split every recorded head-search result is reported against.
+        if test_path is None or not test_path.exists():
+            raise ValueError(
+                "split_strategy='blind_matched' needs the blind set as its reference; "
+                f"test_path {test_path} is missing"
+            )
+        reference = pl.read_csv(test_path, infer_schema_length=None)["SMILES"].to_list()
+        splits, _ = assign_blindlike_splits(
+            table,
+            scored,
+            reference,
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+            seed=split_seed,
+        )
+        splits = splits.alias(_SPLIT_COLUMN)
+    else:
+        splits = assign_splits(
+            table,
+            scored,
+            strategy=split_strategy,  # type: ignore[arg-type]
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+            seed=split_seed,
+        )
     table = table.with_columns(splits)
 
     for name, isoforms in datasets.items():

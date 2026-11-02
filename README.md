@@ -126,6 +126,13 @@ Checkpoints trained with Huber need `models.chemprop_ext` importable to load.
 Censored losses (`--loss-function bounded-mse`) need `<`/`>` in the label CSV;
 none of our datasets carry that yet.
 
+`--split-strategy` defaults to `scaffold`, the pinned split every recorded result
+is reported against. `blind_matched` instead makes the held-out slices imitate the
+blind set's regime — 75% novel scaffolds rather than 100% — which scores about
+0.013 lower and is **not** comparable to the pinned numbers. It is a diagnostic for
+how much the pinned split understates performance, not a reporting axis; it ranks
+models identically. See [reports/blind_matched_split.md](reports/blind_matched_split.md).
+
 Chemprop-based models pass unknown flags (`--batch-size`, `--accelerator`,
 `--task-weights`, ...) through to `chemprop train`. To train on a ready table
 instead, `--data-path data/union_train.csv --target-columns <all heads>`.

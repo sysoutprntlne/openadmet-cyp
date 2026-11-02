@@ -17,6 +17,7 @@ from rich import box
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
+from tqdm import tqdm
 
 from data_tools.inputs import INPUT_REGISTRY, featurize, is_known_input
 from data_tools.load import cv_folds, load_data
@@ -133,6 +134,11 @@ def _combine(predictions: list[np.ndarray], method: str) -> np.ndarray:
     return _ENSEMBLE_METHODS[method](np.stack(predictions), axis=0)
 
 
+def _effective_seeds(cls: type[CYPModel], seeds: list[int | None]) -> list[int | None]:
+    """Seeds to train with: models without a `random_state` argument are fit once."""
+    return seeds if "random_state" in inspect.signature(cls.__init__).parameters else [None]
+
+
 def _fit_members(
     cls: type[CYPModel],
     X_train: np.ndarray,
@@ -141,15 +147,16 @@ def _fit_members(
     X_blind: np.ndarray | None,
     folds: np.ndarray | None,
     seeds: list[int | None],
+    progress: tqdm | None = None,
 ) -> dict:
     """Fit one model per (seed, fold) and collect what each predicts.
 
     Without folds each seed is fit on all training rows. With folds each model is fit on the
     other folds and also predicts its own held-out fold. A seed of None keeps the model's
     default; models without a `random_state` argument are fit once, since seeds can't differ.
+    `progress` ticks once per fitted model.
     """
-    if "random_state" not in inspect.signature(cls.__init__).parameters:
-        seeds = [None]
+    seeds = _effective_seeds(cls, seeds)
     members: dict = {"val": [], "blind": [], "holdout": {}}
     for seed in seeds:
         for k in ([None] if folds is None else np.unique(folds).tolist()):
@@ -161,6 +168,8 @@ def _fit_members(
                 members["blind"].append(model.predict(X_blind))
             if k is not None:
                 members["holdout"].setdefault(k, []).append(model.predict(X_train[folds == k]))
+            if progress is not None:
+                progress.update()
     return members
 
 
@@ -216,6 +225,43 @@ def _stack(members: list[dict], y: np.ndarray, folds: np.ndarray, method: str) -
         "holdout": holdout,
     }
     return out, weights, intercept, params
+
+
+def _ensemble(
+    members: list[tuple[str, dict]], y: np.ndarray, folds: np.ndarray | None, method: str, cv_filter: str | None, label: str,
+) -> tuple[dict, tuple[list[str], np.ndarray, float, dict[str, float]] | None]:
+    """Combine collapsed (name, predictions) members into one ensemble.
+
+    Returns the ensemble's predictions and, for stackers, (member names, weights, intercept, hyperparameters).
+    With a cv_filter, members below the out-of-fold cutoff are dropped first (all are kept if none pass).
+    """
+    kept = members
+    if cv_filter == "r2":
+        scores = {name: _oof_r2(c["holdout"], y, folds) for name, c in members}
+        kept = [(name, c) for name, c in members if scores[name] >= _CV_FILTER_R2]
+        dropped = ", ".join(f"{n} (R²={r:.3f})" for n, r in scores.items() if r < _CV_FILTER_R2)
+        if not kept:
+            kept = members
+            print(
+                f"cv-filter r2: no model reaches out-of-fold R² >= {_CV_FILTER_R2} for {label}; "
+                f"keeping all {len(members)} in the ensemble ({dropped})",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"cv-filter r2: {label}: kept {len(kept)}/{len(members)} models"
+                + (f", dropped {dropped}" if dropped else ""),
+                file=sys.stderr,
+            )
+    if method in _STACKERS:
+        out, weights, intercept, params = _stack([c for _, c in kept], y, folds, method)
+        return out, ([n for n, _ in kept], weights, intercept, params)
+    as_members = [
+        {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
+         "holdout": {k: [v] for k, v in c["holdout"].items()}}
+        for _, c in kept
+    ]
+    return _collapse(as_members, method), None
 
 
 def _cv_metrics(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray) -> dict[str, float]:
@@ -479,10 +525,17 @@ def main() -> None:
         "creates parents, refuses existing files",
     )
     parser.add_argument(
+        "--no-input-ensemble",
+        action="store_true",
+        help="With several input sets (--input repeated or 'all'), don't add an ensemble row across every "
+        "(model, input) pair per target. By default it is added next to each input's own ensemble row, "
+        "with the same --ensemble method and --cv-filter",
+    )
+    parser.add_argument(
         "--cv-filter",
         default=None,
         choices=["r2"],
-        help="Drop models from the multi-model ensemble row per target when their seed-averaged out-of-fold "
+        help="Drop models (or model/input pairs) from the ensemble rows per target when their seed-averaged out-of-fold "
         f"R² is below {_CV_FILTER_R2}. Requires --nfolds and several --models. "
         "If no model passes, all are kept with a warning. Default: no filtering",
     )
@@ -560,6 +613,7 @@ def main() -> None:
     # Stackers only replace the across-model step; models are still averaged over folds and seeds.
     member_method = method if method in _ENSEMBLE_METHODS else "average"
     seeds: list[int | None] = [None] if args.nseeds == 1 else [args.seed + i for i in range(args.nseeds)]
+    ensembling = bool(args.ensemble) or args.nfolds is not None or args.nseeds > 1
 
     if not 0.0 < args.val_split < 1.0:
         print(f"--val-split must be in (0, 1), got {args.val_split}", file=sys.stderr)
@@ -588,8 +642,8 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
 
-    if args.cv_filter is not None and len(model_classes) < 2:
-        print("--cv-filter only affects the multi-model ensemble row; with one model it does nothing", file=sys.stderr)
+    if args.cv_filter is not None and len(model_classes) * len(input_sets) < 2:
+        print("--cv-filter only affects ensemble rows; with one model and one input it does nothing", file=sys.stderr)
 
     cache_dir = Path(args.cache_dir)
 
@@ -621,6 +675,11 @@ def main() -> None:
                 sys.exit(1)
             print(f"Wrote {len(folds)} fold assignments to {args.folds_out}", file=sys.stderr)
 
+    # One tick per fitted model: (seed, fold) pairs per model class, over every target and input set.
+    fits_per_target = sum(len(_effective_seeds(cls, seeds)) for cls in model_classes) * (
+        1 if folds is None else args.nfolds
+    )
+    progress = tqdm(total=fits_per_target * len(args.targets) * len(input_sets), desc="Training", unit="fit")
     results: list[tuple[str, str, str, dict[str, float]]] = []
     cv_results: list[tuple[str, str, str, dict[str, float]]] = []
     prediction_rows: list[dict[str, object]] = []
@@ -630,6 +689,33 @@ def main() -> None:
     blind_df = pl.read_csv(args.data_dir / "test.csv") if args.predict_blind else None
     # (model, input) -> target -> prediction per blind row
     blind_preds: dict[tuple[str, str], dict[str, np.ndarray]] = {}
+    # target -> (model, input, collapsed predictions) for the cross-input ensemble, and per-target row data
+    pairs: dict[str, list[tuple[str, str, dict]]] = {}
+    target_data: dict[str, dict] = {}
+    misaligned: set[str] = set()
+
+    def record(target: str, name: str, input_label: str, out: dict, data: dict) -> None:
+        """Score one prediction set on the validation rows and queue it for the printed and exported results."""
+        predictions = out["val"]
+        y_val = data["y_val"]
+        metrics = _compute_metrics(pl.Series("actual", y_val.tolist()), pl.Series("prediction", predictions.tolist()))
+        if args.correlation:
+            corr_preds.setdefault(target, {})[(name, input_label)] = dict(
+                zip(data["val_index"].tolist(), predictions.tolist())
+            )
+        if args.predictions_out is not None:
+            prediction_rows.extend(
+                dict(zip(_PREDICTION_COLUMNS, (
+                    smiles, target, name, input_label, args.split, args.seed, float(actual), float(pred),
+                )))
+                for smiles, actual, pred in zip(data["val_smiles"], y_val, predictions)
+            )
+        if blind_df is not None:
+            blind_preds.setdefault((name, input_label), {})[target] = out["blind"]
+        results.append((target, name, input_label, {**metrics, "n_train": len(data["y_train"]), "n_val": len(y_val)}))
+        if data["fold_ids"] is not None:
+            cv_results.append((target, name, input_label, _cv_metrics(out["holdout"], data["y_train"], data["fold_ids"])))
+
     for input_names in input_sets:
         input_label = " + ".join(input_names)
         # Features don't depend on the target isoform, so compute once and reuse across isoforms.
@@ -652,65 +738,54 @@ def main() -> None:
                 val_features, val_df[target].to_numpy(), label=f"val/{label}", return_mask=True,
             )
             val_index = np.flatnonzero(val_mask)
-            if args.predictions_out is not None:
-                val_smiles = val_df["SMILES"].to_numpy()[val_mask]
+            val_smiles = val_df["SMILES"].to_numpy()[val_mask] if args.predictions_out is not None else None
             fold_ids = None if folds is None else folds[train_mask]
+            data = {
+                "y_train": y_train, "y_val": y_val, "fold_ids": fold_ids, "train_mask": train_mask,
+                "val_mask": val_mask, "val_index": val_index, "val_smiles": val_smiles,
+            }
+            prior = target_data.setdefault(target, data)
+            if prior is not data and not (
+                np.array_equal(prior["train_mask"], train_mask) and np.array_equal(prior["val_mask"], val_mask)
+            ):
+                misaligned.add(target)
             collapsed = [
                 (cls.name, _collapse([_fit_members(
-                    cls, X_train, y_train, X_val, blind_features if blind_df is not None else None, fold_ids, seeds,
+                    cls, X_train, y_train, X_val, blind_features if blind_df is not None else None, fold_ids, seeds, progress,
                 )], member_method))
                 for cls in model_classes
             ]
-            if len(collapsed) > 1 and (args.ensemble or folds is not None or args.nseeds > 1):
-                members = collapsed
-                if args.cv_filter == "r2":
-                    scores = {name: _oof_r2(c["holdout"], y_train, fold_ids) for name, c in collapsed}
-                    members = [(name, c) for name, c in collapsed if scores[name] >= _CV_FILTER_R2]
-                    dropped = ", ".join(f"{n} (R²={r:.3f})" for n, r in scores.items() if r < _CV_FILTER_R2)
-                    if not members:
-                        members = collapsed
-                        print(
-                            f"cv-filter r2: no model reaches out-of-fold R² >= {_CV_FILTER_R2} for {label}; "
-                            f"keeping all {len(collapsed)} in the ensemble ({dropped})",
-                            file=sys.stderr,
-                        )
-                    else:
-                        print(
-                            f"cv-filter r2: {label}: kept {len(members)}/{len(collapsed)} models"
-                            + (f", dropped {dropped}" if dropped else ""),
-                            file=sys.stderr,
-                        )
-                if method in _STACKERS:
-                    stacked, weights, intercept, params = _stack([c for _, c in members], y_train, fold_ids, method)
-                    stack_reports.append((target, input_label, method, [n for n, _ in members], weights, intercept, params))
-                    collapsed.append((f"ensemble[{method}]", stacked))
-                else:
-                    as_members = [
-                        {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
-                         "holdout": {k: [v] for k, v in c["holdout"].items()}}
-                        for _, c in members
-                    ]
-                    collapsed.append((f"ensemble[{method}]", _collapse(as_members, method)))
-            for name, out in collapsed:
-                predictions = out["val"]
-                metrics = _compute_metrics(pl.Series("actual", y_val.tolist()), pl.Series("prediction", predictions.tolist()))
-                if args.correlation:
-                    corr_preds.setdefault(target, {})[(name, input_label)] = dict(
-                        zip(val_index.tolist(), predictions.tolist())
-                    )
-                if args.predictions_out is not None:
-                    prediction_rows.extend(
-                        dict(zip(_PREDICTION_COLUMNS, (
-                            smiles, target, name, input_label, args.split, args.seed, float(actual), float(pred),
-                        )))
-                        for smiles, actual, pred in zip(val_smiles, y_val, predictions)
-                    )
-                if blind_df is not None:
-                    blind_preds.setdefault((name, input_label), {})[target] = out["blind"]
-                results.append((target, name, input_label, {**metrics, "n_train": len(y_train), "n_val": len(y_val)}))
-                if fold_ids is not None:
-                    cv_results.append((target, name, input_label, _cv_metrics(out["holdout"], y_train, fold_ids)))
+            pairs.setdefault(target, []).extend((name, input_label, out) for name, out in collapsed)
+            rows = list(collapsed)
+            if len(collapsed) > 1 and ensembling:
+                out, report = _ensemble(collapsed, y_train, fold_ids, method, args.cv_filter, label)
+                if report is not None:
+                    stack_reports.append((target, input_label, method, *report))
+                rows.append((f"ensemble[{method}]", out))
+            for name, out in rows:
+                record(target, name, input_label, out, data)
 
+    # Across inputs: one ensemble per target over every (model, input) pair.
+    if ensembling and len(input_sets) > 1 and not args.no_input_ensemble:
+        for target, members in pairs.items():
+            label = f"{target}, all inputs"
+            if target in misaligned:
+                print(
+                    f"No cross-input ensemble for {label}: the inputs drop different rows, so their predictions "
+                    "don't line up (use --no-input-ensemble to silence this)",
+                    file=sys.stderr,
+                )
+                continue
+            data = target_data[target]
+            out, report = _ensemble(
+                [(f"{name} [{_short(input_label)}]", c) for name, input_label, c in members],
+                data["y_train"], data["fold_ids"], method, args.cv_filter, label,
+            )
+            if report is not None:
+                stack_reports.append((target, "all inputs", method, *report))
+            record(target, f"ensemble[{method}]", "all inputs", out, data)
+
+    progress.close()
     if blind_df is not None:
         out_dir = Path("results")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -742,7 +817,7 @@ def main() -> None:
         + escape(_short(" | ".join(" + ".join(g) for g in args.input)))
         + f"  [dim]split[/]={args.split}  [dim]seed[/]={args.seed}"
         + (f"  [dim]nseeds[/]={args.nseeds}" if args.nseeds > 1 else "")
-        + (f"  [dim]ensemble[/]={method}" if args.ensemble or folds is not None or args.nseeds > 1 else "")
+        + (f"  [dim]ensemble[/]={method}" if ensembling else "")
         + (f"  [dim]cv-filter[/]={args.cv_filter}" if args.cv_filter else "")
     )
     _print_results(results, args.sort_by)

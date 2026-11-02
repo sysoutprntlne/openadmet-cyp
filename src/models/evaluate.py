@@ -10,7 +10,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from scipy import stats
+from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.optimize import nnls
+from scipy.spatial.distance import squareform
 from sklearn.linear_model import ElasticNetCV, RidgeCV
 from sklearn.model_selection import PredefinedSplit
 from rich import box
@@ -227,41 +229,97 @@ def _stack(members: list[dict], y: np.ndarray, folds: np.ndarray, method: str) -
     return out, weights, intercept, params
 
 
+def _correlation_clusters(columns: np.ndarray) -> np.ndarray:
+    """Complete-linkage cluster label per model column, joining models whose Pearson r exceeds _DEDUP_CORR."""
+    with np.errstate(invalid="ignore"):
+        correlations = np.nan_to_num(np.corrcoef(columns, rowvar=False), nan=0.0)
+    distances = np.clip(1.0 - correlations, 0.0, 2.0)
+    distances = (distances + distances.T) / 2
+    np.fill_diagonal(distances, 0.0)
+    tree = linkage(squareform(distances, checks=False), method="complete")
+    return fcluster(tree, t=np.nextafter(1.0 - _DEDUP_CORR, -np.inf), criterion="distance")
+
+
+def _as_member(c: dict) -> dict:
+    """Wrap one collapsed prediction set as a single-member group for _collapse."""
+    return {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
+            "holdout": {k: [v] for k, v in c["holdout"].items()}}
+
+
 def _ensemble(
-    members: list[tuple[str, dict]], y: np.ndarray, folds: np.ndarray | None, method: str, cv_filter: str | None, label: str,
-) -> tuple[dict, tuple[list[str], np.ndarray, float, dict[str, float]] | None]:
+    members: list[tuple[str, dict]], y: np.ndarray, y_val: np.ndarray, folds: np.ndarray | None,
+    method: str, filters: list[str], dedup: bool, label: str,
+) -> tuple[dict, tuple[list[str], np.ndarray, float, dict[str, float]] | None, list[dict]]:
     """Combine collapsed (name, predictions) members into one ensemble.
 
-    Returns the ensemble's predictions and, for stackers, (member names, weights, intercept, hyperparameters).
-    With a cv_filter, members below the out-of-fold cutoff are dropped first (all are kept if none pass).
+    Members are first filtered (out-of-fold R² >= _CV_FILTER_R2 and/or validation/out-of-fold RAE ratio
+    <= _CV_FILTER_RAE; if none pass, all are kept), then clusters of near-identical models (Pearson r on
+    validation predictions > _DEDUP_CORR) are replaced by their mean. Returns the ensemble's predictions,
+    for stackers (member names, weights, intercept, hyperparameters), and one log row per input member.
     """
+    log = []
     kept = members
-    if cv_filter == "r2":
-        scores = {name: _oof_r2(c["holdout"], y, folds) for name, c in members}
-        kept = [(name, c) for name, c in members if scores[name] >= _CV_FILTER_R2]
-        dropped = ", ".join(f"{n} (R²={r:.3f})" for n, r in scores.items() if r < _CV_FILTER_R2)
-        if not kept:
-            kept = members
+    if folds is not None and (filters or dedup):
+        rows = []
+        for name, c in members:
+            pooled = _oof_pooled(c["holdout"], folds, len(y))
+            oof_rae = _rae(y, pooled)
+            val_rae = _rae(y_val, c["val"])
+            rows.append({
+                "model": name,
+                "r2": _compute_metrics(pl.Series("actual", y.tolist()), pl.Series("prediction", pooled.tolist()))["R2"],
+                "rae_ratio": val_rae / oof_rae if oof_rae > 0 else float("nan"),
+            })
+        for row in rows:
+            row["failed"] = [
+                f for f, bad in (
+                    ("r2", row["r2"] < _CV_FILTER_R2),
+                    ("RAE", row["rae_ratio"] > _CV_FILTER_RAE),  # undefined ratios (NaN) can't fail
+                ) if f in filters and bad
+            ]
+        survivors = [m for m, row in zip(members, rows) if not row["failed"]]
+        fallback = not survivors
+        kept = members if fallback else survivors
+        if fallback and filters:
             print(
-                f"cv-filter r2: no model reaches out-of-fold R² >= {_CV_FILTER_R2} for {label}; "
-                f"keeping all {len(members)} in the ensemble ({dropped})",
+                f"cv-filter {'+'.join(filters)}: no model passes for {label}; keeping all {len(members)} in the ensemble",
                 file=sys.stderr,
             )
-        else:
+        for row in rows:
+            row["status"] = "kept" if not row["failed"] or fallback else "dropped: " + " + ".join(row["failed"])
+            row["cluster"] = None
+        log = rows
+        if filters:
             print(
-                f"cv-filter r2: {label}: kept {len(kept)}/{len(members)} models"
-                + (f", dropped {dropped}" if dropped else ""),
+                f"cv-filter {'+'.join(filters)}: {label}: kept {len(kept)}/{len(members)} models"
+                + "".join(
+                    f"; dropped {row['model']} (R²={row['r2']:.3f}, RAE ratio={row['rae_ratio']:.2f}: {' + '.join(row['failed'])})"
+                    for row in rows if row["failed"] and not fallback
+                ),
                 file=sys.stderr,
             )
+        if dedup and len(kept) > 1:
+            labels = _correlation_clusters(np.column_stack([c["val"] for _, c in kept]))
+            merged = []
+            by_name = {row["model"]: row for row in rows}
+            for number, cluster in enumerate(dict.fromkeys(labels.tolist()), start=1):
+                group = [kept[i] for i in np.flatnonzero(labels == cluster)]
+                if len(group) == 1:
+                    merged.append(group[0])
+                    continue
+                names = [n for n, _ in group]
+                for n in names:
+                    by_name[n]["cluster"] = number
+                print(
+                    f"cv-dedup: {label}: averaged {len(group)} models with Pearson r > {_DEDUP_CORR}: {', '.join(names)}",
+                    file=sys.stderr,
+                )
+                merged.append((f"mean({', '.join(names)})", _collapse([_as_member(c) for _, c in group], "average")))
+            kept = merged
     if method in _STACKERS:
         out, weights, intercept, params = _stack([c for _, c in kept], y, folds, method)
-        return out, ([n for n, _ in kept], weights, intercept, params)
-    as_members = [
-        {"val": [c["val"]], "blind": [] if c["blind"] is None else [c["blind"]],
-         "holdout": {k: [v] for k, v in c["holdout"].items()}}
-        for _, c in kept
-    ]
-    return _collapse(as_members, method), None
+        return out, ([n for n, _ in kept], weights, intercept, params), log
+    return _collapse([_as_member(c) for _, c in kept], method), None, log
 
 
 def _cv_metrics(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray) -> dict[str, float]:
@@ -282,14 +340,24 @@ def _cv_metrics(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray
 
 # Looser than validation.r_squared_filtering (0.3) in the run-ensemble pipeline.
 _CV_FILTER_R2 = 0.15
+# Validation RAE over out-of-fold RAE above this means the out-of-fold score was too good to trust (leakage).
+_CV_FILTER_RAE = 2.0
+# Models whose validation predictions correlate above this are averaged into one.
+_DEDUP_CORR = 0.95
 
 
-def _oof_r2(holdout: dict[int, np.ndarray], y: np.ndarray, folds: np.ndarray) -> float:
-    """R² of the out-of-fold predictions pooled over all folds."""
-    oof = np.empty(len(y))
+def _oof_pooled(holdout: dict[int, np.ndarray], folds: np.ndarray, n: int) -> np.ndarray:
+    """Out-of-fold predictions of all folds laid out in training-row order."""
+    oof = np.empty(n)
     for k, pred in holdout.items():
         oof[folds == k] = pred
-    return _compute_metrics(pl.Series("actual", y.tolist()), pl.Series("prediction", oof.tolist()))["R2"]
+    return oof
+
+
+def _rae(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """Relative absolute error against always predicting the mean of `actual` (NaN if it is constant)."""
+    deviation = float(np.abs(actual - actual.mean()).sum())
+    return float(np.abs(actual - predicted).sum()) / deviation if deviation > 0.0 else float("nan")
 
 
 def _resolve_models(names: list[str]) -> list[type[CYPModel]]:
@@ -413,6 +481,33 @@ def _print_results(results: list[tuple[str, str, str, dict[str, float]]], sort_b
     console.print(table)
 
 
+def _print_filter_log(log: list[dict], filters: list[str], dedup: bool) -> None:
+    """Print what the ensemble filters decided for every model: its scores, whether it was kept, and its cluster."""
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", title_style="bold", padding=(0, 1), pad_edge=False)
+    for column, justify in [("Isoform", "left"), ("Input", "left"), ("Model", "left"), ("OOF R2", "right"),
+                            ("RAE ratio", "right"), ("Filter", "left"), ("Cluster", "right")]:
+        table.add_column(column, justify=justify, no_wrap=True)
+    groups = list(dict.fromkeys((r["target"], r["input"]) for r in log))
+    for i, (target, input_label) in enumerate(groups):
+        rows = [r for r in log if (r["target"], r["input"]) == (target, input_label)]
+        for j, r in enumerate(rows):
+            kept = r["status"] == "kept"
+            table.add_row(
+                target.replace("_pIC50_direct_inhibition", "") if j == 0 else "",
+                escape(_short(input_label)) if j == 0 else "",
+                escape(r["model"]),
+                f"{r['r2']:.3f}",
+                "[dim]n/a[/]" if np.isnan(r["rae_ratio"]) else f"{r['rae_ratio']:.2f}",
+                r["status"] if kept else f"[red]{r['status']}[/]",
+                "" if r["cluster"] is None else f"c{r['cluster']}",
+                end_section=j == len(rows) - 1 and i < len(groups) - 1,
+            )
+    rules = [f"R² >= {_CV_FILTER_R2}" if "r2" in filters else "", f"RAE ratio <= {_CV_FILTER_RAE}" if "RAE" in filters else "",
+             f"dedup Pearson r > {_DEDUP_CORR} (same cluster = averaged)" if dedup else ""]
+    console.print(f"\n[dim]ensemble filters[/]  {escape('; '.join(r for r in rules if r))}")
+    console.print(table)
+
+
 def _print_stacks(reports: list[tuple[str, str, str, list[str], np.ndarray, float, dict[str, float]]]) -> None:
     """Print each stacker's per-model weights; share is the weight over the sum of absolute weights."""
     table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", title_style="bold", padding=(0, 1), pad_edge=False)
@@ -525,6 +620,12 @@ def main() -> None:
         "creates parents, refuses existing files",
     )
     parser.add_argument(
+        "--no-cv-deduplication",
+        action="store_true",
+        help="Don't average models whose validation predictions correlate above "
+        f"{_DEDUP_CORR} (Pearson, complete linkage) into one before ensembling. On by default with --nfolds",
+    )
+    parser.add_argument(
         "--no-input-ensemble",
         action="store_true",
         help="With several input sets (--input repeated or 'all'), don't add an ensemble row across every "
@@ -533,11 +634,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--cv-filter",
+        nargs="+",
         default=None,
-        choices=["r2"],
-        help="Drop models (or model/input pairs) from the ensemble rows per target when their seed-averaged out-of-fold "
-        f"R² is below {_CV_FILTER_R2}. Requires --nfolds and several --models. "
-        "If no model passes, all are kept with a warning. Default: no filtering",
+        choices=["r2", "RAE", "none"],
+        help="Drop models (or model/input pairs) from the ensemble rows per target before ensembling: "
+        f"r2 drops seed-averaged out-of-fold R² below {_CV_FILTER_R2}; RAE drops those whose validation RAE is more "
+        f"than {_CV_FILTER_RAE}x their out-of-fold RAE (leakage check). If no model passes, all are kept with a "
+        "warning. Default with --nfolds: r2 RAE. Use 'none' to disable",
     )
     parser.add_argument("--models", nargs="+", default=["all"], help="Model names to evaluate, or 'all'")
     parser.add_argument(
@@ -596,7 +699,9 @@ def main() -> None:
     if args.nfolds is None and args.cv_split is not None:
         parser.error("--cv-split requires --nfolds")
     args.cv_split = args.cv_split or args.split
-    if args.cv_filter is not None and args.nfolds is None:
+    if args.cv_filter is not None and "none" in args.cv_filter and len(args.cv_filter) > 1:
+        parser.error("--cv-filter none cannot be combined with other filters")
+    if args.cv_filter not in (None, ["none"]) and args.nfolds is None:
         parser.error("--cv-filter requires --nfolds")
     if args.nseeds < 1:
         parser.error(f"--nseeds must be >= 1, got {args.nseeds}")
@@ -614,6 +719,9 @@ def main() -> None:
     member_method = method if method in _ENSEMBLE_METHODS else "average"
     seeds: list[int | None] = [None] if args.nseeds == 1 else [args.seed + i for i in range(args.nseeds)]
     ensembling = bool(args.ensemble) or args.nfolds is not None or args.nseeds > 1
+    # Filtering and deduplication need out-of-fold predictions, so by default they apply whenever there are folds.
+    filters = [] if args.nfolds is None or args.cv_filter == ["none"] else list(dict.fromkeys(args.cv_filter or ["r2", "RAE"]))
+    dedup = args.nfolds is not None and not args.no_cv_deduplication
 
     if not 0.0 < args.val_split < 1.0:
         print(f"--val-split must be in (0, 1), got {args.val_split}", file=sys.stderr)
@@ -642,8 +750,8 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
 
-    if args.cv_filter is not None and len(model_classes) * len(input_sets) < 2:
-        print("--cv-filter only affects ensemble rows; with one model and one input it does nothing", file=sys.stderr)
+    if (filters or dedup) and len(model_classes) * len(input_sets) < 2:
+        print("--cv-filter and deduplication only affect ensemble rows; with one model and one input they do nothing", file=sys.stderr)
 
     cache_dir = Path(args.cache_dir)
 
@@ -684,6 +792,7 @@ def main() -> None:
     cv_results: list[tuple[str, str, str, dict[str, float]]] = []
     prediction_rows: list[dict[str, object]] = []
     stack_reports: list[tuple[str, str, str, list[str], np.ndarray, float, dict[str, float]]] = []
+    filter_log: list[dict] = []
     # target -> (model, input) -> {val row index: prediction}
     corr_preds: dict[str, dict[tuple[str, str], dict[int, float]]] = {}
     blind_df = pl.read_csv(args.data_dir / "test.csv") if args.predict_blind else None
@@ -758,7 +867,8 @@ def main() -> None:
             pairs.setdefault(target, []).extend((name, input_label, out) for name, out in collapsed)
             rows = list(collapsed)
             if len(collapsed) > 1 and ensembling:
-                out, report = _ensemble(collapsed, y_train, fold_ids, method, args.cv_filter, label)
+                out, report, log = _ensemble(collapsed, y_train, y_val, fold_ids, method, filters, dedup, label)
+                filter_log.extend({"target": target, "input": input_label, **row} for row in log)
                 if report is not None:
                     stack_reports.append((target, input_label, method, *report))
                 rows.append((f"ensemble[{method}]", out))
@@ -777,10 +887,11 @@ def main() -> None:
                 )
                 continue
             data = target_data[target]
-            out, report = _ensemble(
+            out, report, log = _ensemble(
                 [(f"{name} [{_short(input_label)}]", c) for name, input_label, c in members],
-                data["y_train"], data["fold_ids"], method, args.cv_filter, label,
+                data["y_train"], data["y_val"], data["fold_ids"], method, filters, dedup, label,
             )
+            filter_log.extend({"target": target, "input": "all inputs", **row} for row in log)
             if report is not None:
                 stack_reports.append((target, "all inputs", method, *report))
             record(target, f"ensemble[{method}]", "all inputs", out, data)
@@ -818,7 +929,8 @@ def main() -> None:
         + f"  [dim]split[/]={args.split}  [dim]seed[/]={args.seed}"
         + (f"  [dim]nseeds[/]={args.nseeds}" if args.nseeds > 1 else "")
         + (f"  [dim]ensemble[/]={method}" if ensembling else "")
-        + (f"  [dim]cv-filter[/]={args.cv_filter}" if args.cv_filter else "")
+        + (f"  [dim]cv-filter[/]={'+'.join(filters)}" if filters else "")
+        + ("  [dim]cv-dedup[/]=on" if dedup else "")
     )
     _print_results(results, args.sort_by)
     if cv_results:
@@ -827,6 +939,8 @@ def main() -> None:
             "  [dim](metrics averaged over held-out folds of the training portion)[/]"
         )
         _print_results(cv_results, args.sort_by)
+    if filter_log:
+        _print_filter_log(filter_log, filters, dedup)
     if stack_reports:
         _print_stacks(stack_reports)
     if args.correlation:

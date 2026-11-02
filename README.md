@@ -88,6 +88,10 @@ train-model --model unimol --n-seeds 3 --learning-rate 1e-2 1e-3 1e-4 \
     --datasets pubchem:CYP1A2 bindingdb:CYP2C8
 # pretrain on stability, then train on the ADMET data plus auxiliary heads (chemprop/chemeleon)
 train-model --model chemprop --stage tdc_hlm tdc_rlm --stage admet pubchem:CYP1A2
+# same thing, with per-stage settings and an encoder-size sweep
+train-model --model chemprop --pretrain tdc_hlm --finetune admet pubchem:CYP1A2 \
+    --stage-epochs 30 50 --stage-freeze-epochs 0 5 --stage-lr-warmup-shape linear cosine \
+    --stage-loss mae huber --huber-delta 0.5 --hidden-dims 300 600 --mpn-dropouts 0 0.1
 ```
 
 `--datasets` takes `admet` (the ADMET labels) and auxiliary sources such as
@@ -103,6 +107,24 @@ are masked in the loss. With several runs, outputs go to
 `<output-dir>/<config>/seed<N>` (default `results/<model>/...`). Shared flags:
 `--target-columns`, `--split-strategy`, `--split-seed`, `--epochs`, `--seed`,
 `--output-dir`.
+
+Chemprop training options (`src/models/chemprop_ext.py` patches them into
+`chemprop train`; `train-model` runs chemprop through it):
+
+| Flag | Effect |
+|---|---|
+| `--pretrain A B [--pretrain C] --finetune X Y` | Pretrain stages, then the evaluated final stage (shorthand for repeated `--stage`) |
+| `--stage-epochs`, `--stage-warmup-epochs`, `--stage-max-lr`, `--stage-lr-warmup-shape`, `--stage-lr-decay`, `--stage-freeze-epochs`, `--stage-loss` | Per-stage values, one per stage or one for all |
+| `--loss-function huber --huber-delta D` | Huber loss; `D` in pIC50 units |
+| `--label-noise S`, `--label-shrink A` | Training-only target smoothing: Gaussian jitter, or pull toward the batch mean per head |
+| `--lr-warmup-shape linear\|cosine\|exp\|none`, `--lr-decay exp\|cosine\|linear\|constant` | Learning-rate schedule shape (chemprop's `--warmup-epochs`, `--init-lr`, `--max-lr`, `--final-lr` still apply) |
+| `--freeze-epochs N` | Keep the message-passing encoder frozen for the first `N` epochs |
+| `--mpn-dropout P`, `--ffn-dropout P` | Dropout in message passing / the prediction head separately |
+| `--hidden-dims`, `--depths`, `--mpn-dropouts` | Encoder-size sweep: every combination trains, times seeds. Later stages inherit the first stage's encoder size |
+
+Checkpoints trained with Huber need `models.chemprop_ext` importable to load.
+Censored losses (`--loss-function bounded-mse`) need `<`/`>` in the label CSV;
+none of our datasets carry that yet.
 
 Chemprop-based models pass unknown flags (`--batch-size`, `--accelerator`,
 `--task-weights`, ...) through to `chemprop train`. To train on a ready table

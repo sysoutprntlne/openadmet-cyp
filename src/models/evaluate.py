@@ -24,6 +24,7 @@ from tqdm import tqdm
 from data_tools.inputs import INPUT_REGISTRY, featurize, is_known_input
 from data_tools.load import cv_folds, load_data
 from models import REGISTRY, CYPModel
+from models.plots import PLOT_KINDS, show_terminal, write_files
 from models.utils import drop_nan_rows, zero_nonfinite_features
 
 _CYP_TARGETS = [
@@ -38,6 +39,25 @@ _ISOFORMS = {t.split("_")[0].removeprefix("CYP"): t for t in _CYP_TARGETS}
 console = Console()
 
 _PREDICTION_COLUMNS = ["smiles", "isoform", "model", "input", "split", "seed", "y_true", "y_pred"]
+
+
+_BLIND_COLUMNS = ["molecule", "isoform", "model", "input", "split", "seed", "y_pred"]
+
+
+def _blind_path(predictions_out: Path) -> Path:
+    """Sibling file holding the blind-set predictions for a --predictions-out CSV."""
+    return predictions_out.with_suffix(".blind.csv")
+
+
+def _write_blind_predictions(path: Path, rows: list[dict[str, object]]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=_BLIND_COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
+    except OSError as exc:
+        raise OSError(f"Cannot write blind predictions CSV to {path}: {exc}") from exc
 
 
 def _write_predictions(path: Path, rows: list[dict[str, object]]) -> None:
@@ -684,6 +704,22 @@ def main() -> None:
         help="Also predict the blinded test set (data/test.csv) with each fitted model and write one CSV per "
         "(model, input) to results/<model>_<input>_blind_predictions.csv. Models are fit on the train split only.",
     )
+    parser.add_argument(
+        "--plots",
+        nargs="+",
+        choices=PLOT_KINDS,
+        help="Write diagnostic plots, one PNG per isoform and model (or per ensemble where there is one): "
+        "train-test overlays the train label distribution with the predictions on the blind test set (data/test.csv); "
+        "heldout-skew plots predicted vs experimental on the validation split to show systematic over/under-prediction",
+    )
+    parser.add_argument(
+        "--plots-terminal",
+        action="store_true",
+        help="Also draw the --plots in the terminal as a grid (isoforms across, model/input combinations down). "
+        "Uses inline images (kitty, WezTerm, ghostty, iTerm2) and falls back to text plots (plotext), "
+        "wrapped to the terminal width, anywhere else",
+    )
+    parser.add_argument("--plots-dir", type=Path, default=Path("results/plots"), help="Directory for --plots output")
     args = parser.parse_args()
     args.input = args.input or [["rdkit"]]
 
@@ -703,6 +739,8 @@ def main() -> None:
         parser.error("--cv-filter none cannot be combined with other filters")
     if args.cv_filter not in (None, ["none"]) and args.nfolds is None:
         parser.error("--cv-filter requires --nfolds")
+    if args.plots_terminal and not args.plots:
+        parser.error("--plots-terminal requires --plots")
     if args.nseeds < 1:
         parser.error(f"--nseeds must be >= 1, got {args.nseeds}")
     if args.folds_out is not None and args.nfolds is None:
@@ -731,6 +769,14 @@ def main() -> None:
         print(
             f"Cannot write predictions CSV to {args.predictions_out}: file already exists "
             "(checked before training; choose a new path or delete it)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args.predictions_out is not None and _blind_path(args.predictions_out).exists():
+        print(
+            f"Cannot write blind predictions CSV to {_blind_path(args.predictions_out)}: file already exists "
+            "(checked before training; choose a new --predictions-out path or delete it)",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -791,11 +837,14 @@ def main() -> None:
     results: list[tuple[str, str, str, dict[str, float]]] = []
     cv_results: list[tuple[str, str, str, dict[str, float]]] = []
     prediction_rows: list[dict[str, object]] = []
+    blind_rows: list[dict[str, object]] = []
+    plot_rows: list[dict] = []
     stack_reports: list[tuple[str, str, str, list[str], np.ndarray, float, dict[str, float]]] = []
     filter_log: list[dict] = []
     # target -> (model, input) -> {val row index: prediction}
     corr_preds: dict[str, dict[tuple[str, str], dict[int, float]]] = {}
-    blind_df = pl.read_csv(args.data_dir / "test.csv") if args.predict_blind else None
+    # The train-test plot compares train labels with predictions on the blind set, so it needs them too.
+    blind_df = pl.read_csv(args.data_dir / "test.csv") if args.predict_blind or "train-test" in (args.plots or []) else None
     # (model, input) -> target -> prediction per blind row
     blind_preds: dict[tuple[str, str], dict[str, np.ndarray]] = {}
     # target -> (model, input, collapsed predictions) for the cross-input ensemble, and per-target row data
@@ -819,8 +868,19 @@ def main() -> None:
                 )))
                 for smiles, actual, pred in zip(data["val_smiles"], y_val, predictions)
             )
+        if args.plots:
+            plot_rows.append({
+                "target": target, "name": name, "input": input_label, "is_ensemble": name.startswith("ensemble["),
+                "y_train": data["y_train"], "y_val": y_val, "pred_val": np.asarray(predictions, dtype=float),
+                "pred_blind": None if out["blind"] is None else np.asarray(out["blind"], dtype=float),
+            })
         if blind_df is not None:
             blind_preds.setdefault((name, input_label), {})[target] = out["blind"]
+            if args.predictions_out is not None:
+                blind_rows.extend(
+                    dict(zip(_BLIND_COLUMNS, (mol, target, name, input_label, args.split, args.seed, float(pred))))
+                    for mol, pred in zip(blind_df["Molecule_Name"].to_list(), out["blind"])
+                )
         results.append((target, name, input_label, {**metrics, "n_train": len(data["y_train"]), "n_val": len(y_val)}))
         if data["fold_ids"] is not None:
             cv_results.append((target, name, input_label, _cv_metrics(out["holdout"], data["y_train"], data["fold_ids"])))
@@ -897,7 +957,12 @@ def main() -> None:
             record(target, f"ensemble[{method}]", "all inputs", out, data)
 
     progress.close()
-    if blind_df is not None:
+    if plot_rows:
+        written = write_files(args.plots, plot_rows, args.plots_dir)
+        print(f"Wrote {len(written)} plots to {args.plots_dir}", file=sys.stderr)
+        if args.plots_terminal:
+            show_terminal(args.plots, plot_rows)
+    if args.predict_blind:
         out_dir = Path("results")
         out_dir.mkdir(parents=True, exist_ok=True)
         for (name, input_label), by_target in blind_preds.items():
@@ -914,6 +979,13 @@ def main() -> None:
             print(str(exc), file=sys.stderr)
             sys.exit(1)
         print(f"Wrote {len(prediction_rows)} validation predictions to {args.predictions_out}", file=sys.stderr)
+        if blind_rows:
+            try:
+                _write_blind_predictions(_blind_path(args.predictions_out), blind_rows)
+            except OSError as exc:
+                print(str(exc), file=sys.stderr)
+                sys.exit(1)
+            print(f"Wrote {len(blind_rows)} blind predictions to {_blind_path(args.predictions_out)}", file=sys.stderr)
 
     reverse = not _LOWER_IS_BETTER[args.sort_by]
 

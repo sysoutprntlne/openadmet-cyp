@@ -15,6 +15,7 @@ dynamic = ["version", "dependencies"]
 [project.scripts]
 download-data = "data_tools.download:main"
 evaluate-models = "models.evaluate:main"
+plot-results = "models.plot_results:main"
 generate-results = "models.predict:main"
 train-chemprop = "models.train_chemprop:main"
 train-unimol = "models.train_unimol:main"

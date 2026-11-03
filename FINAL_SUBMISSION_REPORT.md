@@ -65,17 +65,33 @@ On 3-fold scaffold CV the ensemble's mean is RMSE 0.521, MAE 0.360, R² 0.691. T
 
 The Chemprop checkpoints are what is reproduced; TabPFN and the ensemble are refit from them.
 
-**1. The three `grid_*_chem` families** (exact; from `scripts/run_model_grid.sh`). CheMeleon init, MAE loss,
-seeds 0 1 2:
+**1. The three `grid_*_chem` families.** CheMeleon init, MAE loss, seeds 0 1 2, one `train-model` call
+(`--model chemeleon` is chemprop started from the CheMeleon weights). This replaces the older
+`scripts/run_model_grid.sh` grid search; the dataset lists are the same ones it used. Every name is from
+`train-model --list-datasets`, and only listed datasets are trained on; `challenge` is the competition labels
+the old script always included, so it is listed in every config:
 
 ```bash
 export CHEMPROP_HOME=.chemeleon
-SEEDS="0 1 2" ONLY="admet_chemeleon aux_chemeleon both_chemeleon" bash scripts/run_model_grid.sh
-# or on SCC:
-qsub -v SEEDS="0 1 2",ONLY="admet_chemeleon aux_chemeleon both_chemeleon" scripts/model_grid.qsub
+ADMET="tdc_hlm tdc_rlm expansionrx tdc_clearance_microsome_az tdc_half_life_obach tdc_cyp2c9_substrate tdc_cyp2d6_substrate tdc_cyp3a4_substrate"
+AUX="pubchem chembl bindingdb tdi single_conc"
+
+train-model --model chemeleon --loss-function mae --metrics mae rmse --show-individual-scores \
+  --seeds 0 1 2 \
+  --datasets challenge $ADMET \
+  --datasets challenge $AUX \
+  --datasets challenge $ADMET $AUX \
+  --output-dir results/chemprop/grid_chem
+# or on SCC (extra args pass through to train-model):
+qsub scripts/train_model.qsub --model chemeleon --loss-function mae --seeds 0 1 2 \
+  --datasets challenge $ADMET --datasets challenge $AUX --datasets challenge $ADMET $AUX \
+  --output-dir results/chemprop/grid_chem
 ```
 
-Output: `results/chemprop/grid/{admet,aux,both}_chemeleon/seed{0,1,2}/`.
+Output: one `results/chemprop/grid_chem/<config>/seed{0,1,2}/` per config, where the config directory name is the
+slug of the dataset list. These map to `grid_adme_chem`, `grid_aux_chem` and `grid_both_chem` in the order
+given. Not re-run: the dataset lists and flags come from the grid script and the CLI source, but I have not
+checked that this call reproduces the original checkpoints exactly.
 
 **2. `huber_soft` and `mae_admet`.** The recipes below come from the run names and the `train-model` flags; the
 repository does not record the dataset arguments used for these runs, so set `--datasets` to the config you
@@ -85,11 +101,11 @@ trained on. Run each recipe three times to get the three batches (`_`, `_2`, `_3
 # huber_soft: Huber loss plus soft labels (label noise and shrink)
 train-model --model chemprop --epochs 60 --n-seeds 3 --seed 0 \
   --loss-function huber --huber-delta 0.5 --label-noise 0.2 --label-shrink 0.1 \
-  --datasets admet --output-dir results/chemprop/huber_soft
+  --datasets challenge --output-dir results/chemprop/huber_soft
 
 # mae_admet: MAE loss on the ADMET data
 train-model --model chemprop --epochs 60 --n-seeds 3 --seed 0 \
-  --loss-function mae --datasets admet --output-dir results/chemprop/mae_admet
+  --loss-function mae --datasets challenge --output-dir results/chemprop/mae_admet
 ```
 
 Checkpoints trained with `--loss-function huber` need `models.chemprop_losses` importable to load (fixed in

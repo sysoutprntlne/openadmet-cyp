@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import polars as pl
 
+from models.caruana import fit_caruana_stack
 from models.stack import (
     fit_elasticnetcv_stack,
     fit_nnls_stack,
@@ -35,7 +36,8 @@ def fit_filtered_stack(
     """
 
     stackers = {
-        "nnls": fit_nnls_stack, 
+        "nnls": fit_nnls_stack,
+        "caruana": fit_caruana_stack,
         "ridgecv": fit_ridgecv_stack,
         "elasticnetcv": fit_elasticnetcv_stack,
     }

@@ -301,8 +301,9 @@ evaluate-models --models ridge random_forest lightgbm --input morgan --input rdk
 - `--nfolds N`, `--cv-split random|scaffold|butina`: k-fold CV on the training
   split; `--folds-out` saves each training molecule's fold to a new CSV.
 - `--nseeds N`: seed averaging per model (models without `random_state` train once).
-- `--ensemble average|min|max|nnls|ridgecv|elasticnetcv`: how models are combined into
-  an `ensemble[...]` row. The stackers learn per-target weights from out-of-fold
+- `--ensemble average|min|max|nnls|caruana|ridgecv|elasticnetcv`: how models are combined into
+  an `ensemble[...]` row. `caruana` is greedy selection with replacement
+  (nonnegative weights summing to one, no intercept). The stackers learn per-target weights from out-of-fold
   predictions (`ridgecv` and `elasticnetcv` need `--nfolds >= 3`), print the
   weights, shares, intercept and chosen hyperparameters, and score the stack
   with leave-one-fold-out refits. Models are still averaged over folds and seeds.

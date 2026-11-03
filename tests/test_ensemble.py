@@ -57,7 +57,7 @@ def ensemble_tables():
     return tables
 
 
-@pytest.mark.parametrize("method", ["nnls", "ridgecv", "elasticnetcv"])
+@pytest.mark.parametrize("method", ["nnls", "caruana", "ridgecv", "elasticnetcv"])
 def test_filtered_stack_end_to_end(ensemble_tables, method):
     result = ensemble.fit_filtered_stack(**ensemble_tables, method=method)
 

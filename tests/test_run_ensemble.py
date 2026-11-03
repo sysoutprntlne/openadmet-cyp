@@ -95,7 +95,7 @@ def test_runner_preserves_existing_run(runner_setup):
     assert saved.read_text() == "existing run\n"
 
 
-@pytest.mark.parametrize("method", ["nnls", "ridgecv", "elasticnetcv", "all_rejected"])
+@pytest.mark.parametrize("method", ["nnls", "caruana", "ridgecv", "elasticnetcv", "all_rejected"])
 @pytest.mark.parametrize("saved_folds", [False, True])
 def test_runner_saves_complete_run(tmp_path, monkeypatch, method, saved_folds):
     data = prepare_ensemble_data(pl.DataFrame({
@@ -232,7 +232,7 @@ def test_runner_saves_complete_run(tmp_path, monkeypatch, method, saved_folds):
         assert set(fitted["weights"]) == set(
             membership.filter(pl.col("target") == target)["cluster_id"]
         )
-        if method != "nnls":
+        if method not in {"nnls", "caruana"}:
             assert "intercept" in fitted and "alpha" in fitted
         if method == "elasticnetcv":
             assert "l1_ratio" in fitted

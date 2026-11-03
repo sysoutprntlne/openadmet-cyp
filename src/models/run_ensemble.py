@@ -93,7 +93,7 @@ def run(config: dict) -> None:
         if any(output_dir.iterdir()):
             raise ValueError("Output directory must be empty")
 
-    if config["stacker"] not in {"nnls", "ridgecv", "elasticnetcv"}:
+    if config["stacker"] not in {"nnls", "caruana", "ridgecv", "elasticnetcv"}:
         raise ValueError(f"Unknown stacking method: {config['stacker']}")
         
     data = pl.read_csv(config["data_path"], infer_schema_length=None)

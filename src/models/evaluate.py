@@ -24,6 +24,7 @@ from tqdm import tqdm
 from data_tools.inputs import INPUT_REGISTRY, featurize, is_known_input
 from data_tools.load import cv_folds, load_data
 from models import REGISTRY, CYPModel
+from models.caruana import fit_caruana_weights
 from models.plots import PLOT_KINDS, show_terminal, write_files
 from models.utils import drop_nan_rows, zero_nonfinite_features
 
@@ -148,7 +149,7 @@ _ENSEMBLE_METHODS = {"average": np.mean, "min": np.min, "max": np.max}
 
 
 # Learned per-target weights over the models' out-of-fold predictions, as in stack.py.
-_STACKERS = ["nnls", "ridgecv", "elasticnetcv"]
+_STACKERS = ["nnls", "caruana", "ridgecv", "elasticnetcv"]
 
 
 def _combine(predictions: list[np.ndarray], method: str) -> np.ndarray:
@@ -211,9 +212,12 @@ def _fit_stacker(
 
     Ridge and elastic-net pick their regularisation on the same folds the base models were held out on.
     NNLS has no intercept and its weights are not constrained to sum to one.
+    Caruana selection has no intercept; its weights are nonnegative and sum to one.
     """
     if method == "nnls":
         return nnls(X, y)[0], 0.0, {}
+    if method == "caruana":
+        return fit_caruana_weights(X, y)[0], 0.0, {}
     cv = PredefinedSplit(test_fold=folds)
     if method == "ridgecv":
         model = RidgeCV(alphas=[0.1, 1.0, 10.0], cv=cv, scoring="neg_mean_squared_error").fit(X, y)
@@ -629,7 +633,7 @@ def main() -> None:
         default=None,
         choices=[*_ENSEMBLE_METHODS, *_STACKERS],
         help="How to combine predictions across folds (--nfolds), seeds (--nseeds) and, when several "
-        "--models are given, across models, which adds an ensemble row. nnls, ridgecv and elasticnetcv "
+        "--models are given, across models, which adds an ensemble row. nnls, caruana, ridgecv and elasticnetcv "
         "instead learn per-target model weights from out-of-fold predictions (requires --nfolds; models "
         "are still averaged over folds and seeds) and print the weights. Default: average whenever "
         "--nfolds or --nseeds is used",

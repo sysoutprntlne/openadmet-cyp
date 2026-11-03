@@ -597,8 +597,11 @@ def main() -> None:
     parser.add_argument(
         "--split",
         default="scaffold",
-        choices=["random", "scaffold", "butina"],
-        help="Train/val split strategy (default: scaffold)",
+        choices=["random", "scaffold", "butina", "blind_matched"],
+        help="Train/val split strategy (default: scaffold). 'blind_matched' makes the validation slice "
+        "imitate data/test.csv (~75%% novel scaffolds instead of 100%%, closer to train); it scores "
+        "about 0.013 lower and is not comparable to scaffold results. Needs data/test.csv. "
+        "See reports/blind_matched_split.md",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed for splitting")
     parser.add_argument(
@@ -618,7 +621,7 @@ def main() -> None:
         "--cv-split",
         default=None,
         choices=["random", "scaffold", "butina"],
-        help="Fold assignment strategy for --nfolds (default: same as --split). "
+        help="Fold assignment strategy for --nfolds (default: same as --split, or scaffold when --split is blind_matched). "
         "Scaffold and Butina keep each group within one fold.",
     )
     parser.add_argument(
@@ -738,7 +741,8 @@ def main() -> None:
         parser.error(f"--nfolds must be >= 2, got {args.nfolds}")
     if args.nfolds is None and args.cv_split is not None:
         parser.error("--cv-split requires --nfolds")
-    args.cv_split = args.cv_split or args.split
+    # blind_matched shapes only the held-out slice; the CV folds inside train stay scaffold-grouped
+    args.cv_split = args.cv_split or ("scaffold" if args.split == "blind_matched" else args.split)
     if args.cv_filter is not None and "none" in args.cv_filter and len(args.cv_filter) > 1:
         parser.error("--cv-filter none cannot be combined with other filters")
     if args.cv_filter not in (None, ["none"]) and args.nfolds is None:

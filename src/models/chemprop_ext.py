@@ -24,12 +24,9 @@ import math
 import sys
 
 import torch
-import torch.nn.functional as F
-from chemprop.nn import LossFunctionRegistry
-from chemprop.nn.metrics import MAE, MSE
 from torch import nn
 
-_CONFIG: dict[str, float | None] = {"huber_delta": 1.0, "label_noise": 0.0, "label_shrink": 0.0}
+from models.chemprop_losses import _CONFIG, Huber, _patch_smoothing, smooth_targets  # noqa: F401
 
 
 def _parse(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -43,39 +40,6 @@ def _parse(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     p.add_argument("--mpn-dropout", type=float, default=None)
     p.add_argument("--ffn-dropout", type=float, default=None)
     return p.parse_known_args(argv)
-
-
-def smooth_targets(targets: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """Noise and shrink targets; only while gradients are on (i.e. in training, not validation)."""
-    noise, shrink = _CONFIG["label_noise"], _CONFIG["label_shrink"]
-    if not (noise or shrink) or not torch.is_grad_enabled():
-        return targets
-    if shrink:
-        m = mask.to(targets.dtype)
-        mean = (targets * m).sum(0, keepdim=True) / m.sum(0, keepdim=True).clamp(min=1)
-        targets = (1 - shrink) * targets + shrink * mean
-    if noise:
-        targets = targets + noise * torch.randn_like(targets)
-    return targets
-
-
-@LossFunctionRegistry.register("huber")
-class Huber(MSE):
-    """Huber loss. Module-level so chemprop can pickle it into checkpoints (loading one needs models.chemprop_ext importable)."""
-
-    def _calc_unreduced_loss(self, preds, targets, *args):
-        return F.huber_loss(preds, targets, reduction="none", delta=float(_CONFIG["huber_delta"]))
-
-
-def _patch_smoothing() -> None:
-    for cls in (MSE, MAE, Huber):
-        original = cls._calc_unreduced_loss
-
-        def wrapped(self, preds, targets, *args, _orig=original):
-            mask = args[0] if args else torch.ones_like(targets, dtype=torch.bool)
-            return _orig(self, preds, smooth_targets(targets, mask), *args)
-
-        cls._calc_unreduced_loss = wrapped
 
 
 def lr_at(step: int, warm: int, total: int, init: float, peak: float, final: float, shape: str, decay: str) -> float:

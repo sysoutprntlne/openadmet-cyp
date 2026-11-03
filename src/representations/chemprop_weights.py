@@ -51,6 +51,14 @@ def _load_model(path: Path):
 
     if not path.exists():
         raise FileNotFoundError(f"chemprop weights not found: {path}")
+    # Checkpoints from `--loss-function huber` made before models.chemprop_losses existed
+    # pickled the loss as __main__.Huber; make that resolve.
+    import __main__
+
+    from models.chemprop_losses import Huber
+
+    if not hasattr(__main__, "Huber"):
+        __main__.Huber = Huber
     if path.suffix == ".ckpt":
         model = MPNN.load_from_checkpoint(path, map_location="cpu")
     else:

@@ -77,30 +77,30 @@ Pick the model with `--model`:
 
 ```bash
 train-model --list-datasets                     # selectable sources
-train-model --model chemprop --datasets admet tdc_hlm pubchem:CYP1A2 bindingdb:CYP1A2,CYP2C8 --loss-function mae
-train-model --model chemeleon --datasets admet pubchem:CYP1A2
-train-model --model unimol --datasets admet pubchem:CYP1A2 --learning-rate 2e-4
+train-model --model chemprop --datasets challenge tdc_hlm pubchem:CYP1A2 bindingdb:CYP1A2,CYP2C8 --loss-function mae
+train-model --model chemeleon --datasets challenge pubchem:CYP1A2
+train-model --model unimol --datasets challenge pubchem:CYP1A2 --learning-rate 2e-4
 # configs x learning rates x seeds: repeat --datasets, add --n-seeds N (or --seeds 0 1 2) and, for unimol, several
 # --learning-rate values; one model per combination
 train-model --model unimol --n-seeds 3 --learning-rate 1e-2 1e-3 1e-4 \
-    --datasets admet \
-    --datasets admet pubchem:CYP1A2 bindingdb:CYP2C8 \
+    --datasets challenge \
+    --datasets challenge pubchem:CYP1A2 bindingdb:CYP2C8 \
     --datasets pubchem:CYP1A2 bindingdb:CYP2C8
 # pretrain on stability, then train on the ADMET data plus auxiliary heads (chemprop/chemeleon)
-train-model --model chemprop --stage tdc_hlm tdc_rlm --stage admet pubchem:CYP1A2
+train-model --model chemprop --stage tdc_hlm tdc_rlm --stage challenge pubchem:CYP1A2
 # same thing, with per-stage settings and an encoder-size sweep
-train-model --model chemprop --pretrain tdc_hlm --finetune admet pubchem:CYP1A2 \
+train-model --model chemprop --pretrain tdc_hlm --finetune challenge pubchem:CYP1A2 \
     --stage-epochs 30 50 --stage-freeze-epochs 0 5 --stage-lr-warmup-shape linear cosine \
     --stage-loss mae huber --huber-delta 0.5 --hidden-dims 300 600 --mpn-dropouts 0 0.1
 ```
 
-`--datasets` takes `admet` (the ADMET labels) and auxiliary sources such as
-`pubchem`, `bindingdb`, `tdi` or `chembl`, as `NAME[:ISO,ISO]`; heads are named
-`{isoform}-{source}`. Only what you list is trained on: `--datasets admet` is the
-ADMET data alone, `--datasets admet pubchem` is both, and `--datasets pubchem`
-is the auxiliary data alone. The ADMET data is still loaded in every case,
+`--datasets` takes any name from `train-model --list-datasets` (`challenge`, `pubchem`,
+`bindingdb`, `tdi`, `tdc_hlm`, ...), as `NAME[:ISO,ISO]`; heads are named
+`{isoform}-{source}`. Only what you list is trained on: `--datasets challenge` is the
+challenge labels alone, `--datasets challenge pubchem` is both, and `--datasets pubchem`
+is the auxiliary data alone. The challenge data is still loaded in every case,
 since it provides the pinned train/val split and the validation molecules; with
-no `admet` in the config its labels are just not trained on, and each ADMET head
+no `challenge` in the config its labels are just not trained on, and each challenge head
 is scored with the same-isoform auxiliary head, so that RMSE carries a
 cross-assay calibration offset. Each head keeps its own scale and missing labels
 are masked in the loss. With several runs, outputs go to

@@ -1,17 +1,17 @@
-"""Train any supported model on the ADMET data plus auxiliary datasets.
+"""Train any supported model on the listed datasets.
 
-  train-model --model chemprop  --datasets admet pubchem:CYP1A2 bindingdb:CYP2C8 --loss-function mae
-  train-model --model chemeleon --datasets admet pubchem:CYP1A2
-  train-model --model unimol    --datasets admet pubchem:CYP1A2 --learning-rate 2e-4
+  train-model --model chemprop  --datasets challenge pubchem:CYP1A2 bindingdb:CYP2C8 --loss-function mae
+  train-model --model chemeleon --datasets challenge pubchem:CYP1A2
+  train-model --model unimol    --datasets challenge pubchem:CYP1A2 --learning-rate 2e-4
 
-Only the datasets you list are trained on ('admet' is the ADMET labels). Repeat
+Only the datasets you list are trained on (names from --list-datasets). Repeat
 --datasets for several configs, add --n-seeds N (or --seeds 0 1 2), and for
 unimol give several --learning-rate values: every combination trains one model
 (configs x learning rates x seeds):
 
   train-model --model unimol --n-seeds 3 --learning-rate 5e-5 2e-4 5e-4 \\
-      --datasets admet \\
-      --datasets admet pubchem:CYP1A2 bindingdb:CYP2C8 \\
+      --datasets challenge \\
+      --datasets challenge pubchem:CYP1A2 bindingdb:CYP2C8 \\
       --datasets pubchem:CYP1A2 bindingdb:CYP2C8
 
 Datasets, split and head selection are shared (models.training.common); each
@@ -28,7 +28,7 @@ from data_tools.merge_datasets import describe
 from models.training import BACKENDS
 from models.training.common import add_common_arguments, slug
 
-_ADMET = "admet"  # names the ADMET labels as training data; not a mergeable source
+_CHALLENGE = "challenge"  # the scored heads: trained on only when listed, always loaded for the split
 
 
 def main(argv: list[str] | None = None, model: str | None = None) -> None:
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None, model: str | None = None) -> None:
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
 
     if backend.requires_datasets and not args.datasets:
-        parser.error("pass --datasets (e.g. --datasets admet, or --datasets admet pubchem:CYP1A2); see --list-datasets")
+        parser.error("pass --datasets (e.g. --datasets challenge, or --datasets challenge pubchem:CYP1A2); see --list-datasets")
     seeds = args.seeds or (list(range(args.seed, args.seed + args.n_seeds)) if args.n_seeds else [args.seed])
     lrs = args.learning_rate if hasattr(args, "learning_rate") else [None]  # only backends with the flag sweep it
     variants = backend.variants(args)  # e.g. encoder-size sweep; [{}] when the backend has none
@@ -78,11 +78,11 @@ def main(argv: list[str] | None = None, model: str | None = None) -> None:
         if lr is not None:
             run.learning_rate = lr
         run.variant = variant
-        run.use_admet = True
-        run.run_label = _ADMET
+        run.use_challenge = True
+        run.run_label = _CHALLENGE
         if group is not None:
-            run.use_admet = _ADMET in group
-            run.datasets = [t for t in group if t != _ADMET]
+            run.use_challenge = _CHALLENGE in group
+            run.datasets = [t for t in group if t != _CHALLENGE]
             run.run_label = slug(group)
         tag = "_".join(f"{k}{v}" for k, v in variant.items())
         if tag:

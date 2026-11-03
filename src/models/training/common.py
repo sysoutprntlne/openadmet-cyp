@@ -1,8 +1,8 @@
 """Data handling shared by every training backend.
 
 Datasets are chosen with `--datasets NAME[:ISO,ISO]` and merged at run time into
-one wide table with a head per source x isoform. The ADMET data is always part of
-the final stage: it supplies the four scored heads and the pinned split.
+one wide table with a head per source x isoform. The `challenge` data is always
+loaded (it supplies the four scored heads and the pinned split) but is trained on only when listed.
 """
 
 import argparse
@@ -19,7 +19,7 @@ from data_tools.overlap import add_keys
 
 def slug(specs: list[str]) -> str:
     """Directory-safe name for a list of dataset specs."""
-    return "+".join(specs).replace(":", "-").replace(",", "_") or "admet"
+    return "+".join(specs).replace(":", "-").replace(",", "_") or "challenge"
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -30,9 +30,8 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=None,
         metavar="NAME[:ISO,ISO]",
-        help="One dataset config; repeat --datasets for several. Only the datasets you list are trained on: 'admet' "
-        "is the ADMET data, so --datasets admet pubchem:CYP1A2 trains on both and --datasets pubchem:CYP1A2 on the "
-        "auxiliary data alone (the ADMET heads are then scored with the same-isoform auxiliary head). Heads are "
+        help="One dataset config; repeat --datasets for several. Only the datasets you list are trained on: names are those of --list-datasets, so --datasets challenge pubchem:CYP1A2 trains on both and --datasets pubchem:CYP1A2 on the "
+        "auxiliary data alone (the challenge heads are then scored with the same-isoform auxiliary head). Heads are "
         "named {isoform}-{source}, e.g. bindingdb:CYP2D6,CYP1A2 tdi. Every config is trained once per seed.",
     )
     parser.add_argument("--list-datasets", action="store_true", help="List selectable datasets and exit")
@@ -81,18 +80,18 @@ def prepare_joint_split(
     auxiliary-only molecules still train their head. Val is the pinned val split.
     """
     table, heads, scored, tasks = merge_stage(specs, args)
-    if not args.use_admet:
+    if not args.use_challenge:
         target_columns = args.target_columns or [h for h in heads if h not in scored]
         if any(h in scored for h in target_columns):
-            parser.error("--target-columns lists ADMET heads but the config does not include admet")
+            parser.error("--target-columns lists challenge heads but the config does not include challenge")
         if not target_columns:
-            parser.error("nothing to train on: list admet or an auxiliary dataset in --datasets")
+            parser.error("nothing to train on: list challenge or an auxiliary dataset in --datasets")
     else:
         target_columns = args.target_columns or heads
     unknown = [c for c in target_columns if c not in heads]
     if unknown:
         parser.error(f"--target-columns not among heads {heads}: {unknown}")
-    if not args.use_admet:
+    if not args.use_challenge:
         # Score each ADMET head with the first auxiliary head of the same isoform (CYP1A2-Direct <- CYP1A2-PubChem).
         eval_map = {}
         for head in scored:

@@ -10,20 +10,20 @@ previous stage's message-passing encoder and aggregation (the heads are fresh,
 so stages can have different heads and even different task types).
 
   # one stage, everything jointly
-  train-model --model chemprop --datasets admet tdc_hlm tdc_rlm pubchem:CYP1A2 --loss-function mae
+  train-model --model chemprop --datasets challenge tdc_hlm tdc_rlm pubchem:CYP1A2 --loss-function mae
 
   # pretrain on stability, then train on the challenge plus auxiliary heads
-  train-model --model chemprop --stage tdc_hlm tdc_rlm --stage admet pubchem:CYP1A2 bindingdb:CYP2C8
+  train-model --model chemprop --stage tdc_hlm tdc_rlm --stage challenge pubchem:CYP1A2 bindingdb:CYP2C8
 
   # the same with --pretrain/--finetune (repeat --pretrain for several pretraining stages)
-  train-model --model chemprop --pretrain tdc_hlm tdc_rlm --finetune admet pubchem:CYP1A2
+  train-model --model chemprop --pretrain tdc_hlm tdc_rlm --finetune challenge pubchem:CYP1A2
 
 Per-stage options take one value per stage (or one value for all): --stage-epochs,
 --stage-warmup-epochs, --stage-max-lr, --stage-lr-warmup-shape, --stage-lr-decay,
 --stage-freeze-epochs, --stage-loss. Freeze the encoder while the fresh head settles
 (then thaw it for the rest of the stage):
 
-  train-model --model chemprop --pretrain tdc_hlm --finetune admet \\
+  train-model --model chemprop --pretrain tdc_hlm --finetune challenge \\
       --stage-epochs 30 50 --stage-freeze-epochs 0 10 --stage-warmup-epochs 2 5 --stage-lr-warmup-shape linear cosine
 
 Sweep encoder size (the head is thrown away when the encoder is used as features):
@@ -32,7 +32,7 @@ trains (x seeds). Later stages inherit the first stage's encoder size.
 Extra flags (--huber-delta, --label-noise, --label-shrink, --lr-decay, --mpn-dropout,
 --ffn-dropout, ...) are described in models.chemprop_ext.
 
-Only the datasets you list train ('admet' is the ADMET labels); the last stage is
+Only the datasets you list train (names from --list-datasets); the last stage is
 evaluated on the pinned split. Earlier stages train on molecules in the pinned
 train split only, so no val/test molecule is seen during pretraining; they use
 chemprop's own random split of those rows for early stopping. A stage whose
@@ -145,7 +145,7 @@ class ChempropBackend(Backend):
             default=None,
             metavar="NAME[:ISO,ISO]",
             help="One training stage; repeat for several. Each stage starts from the previous stage's encoder. "
-            "Name 'admet' in a stage to train on the ADMET labels there.",
+            "Name 'challenge' in a stage to train on the challenge labels there.",
         )
         parser.add_argument(
             "--pretrain",
@@ -246,10 +246,10 @@ class ChempropBackend(Backend):
             print(f"Running: {' '.join(cmd)}", file=sys.stderr)
             return subprocess.run(cmd, check=False).returncode
 
-        # Only listed datasets train: 'admet' names the ADMET labels (the grid has already split it off --datasets).
-        use_admet = [args.use_admet] if args.datasets is not None else ["admet" in s for s in stage_specs]
+        # Only listed datasets train: 'challenge' is the scored labels, trained on only when named.
+        use_challenge = [args.use_challenge] if args.datasets is not None else ["challenge" in s for s in stage_specs]
         try:
-            parsed = [parse_dataset_specs([t for t in s if t != "admet"], with_challenge=False) for s in stage_specs]
+            parsed = [parse_dataset_specs([t for t in s if t != "challenge"], with_challenge=False) for s in stage_specs]
         except ValueError as exc:
             parser.error(str(exc))
         n_stages = len(parsed)
@@ -263,9 +263,9 @@ class ChempropBackend(Backend):
             stage_dir = output_dir if n_stages == 1 else output_dir / f"stage{index + 1}"
             stage_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"\n=== {label}: {', '.join((['admet'] if use_admet[index] else []) + list(specs))} ===", file=sys.stderr)
+            print(f"\n=== {label}: {', '.join((['challenge'] if use_challenge[index] else []) + list(specs))} ===", file=sys.stderr)
             table, heads, scored, tasks = merge_stage(specs, args)
-            stage_heads = [h for h in heads if h not in scored or use_admet[index]]
+            stage_heads = [h for h in heads if h not in scored or use_challenge[index]]
             unknown = [c for c in args.target_columns or [] if c not in stage_heads]
             if unknown:
                 parser.error(f"--target-columns not among {label} heads {stage_heads}: {unknown}")

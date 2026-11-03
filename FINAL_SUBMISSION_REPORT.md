@@ -65,35 +65,55 @@ On 3-fold scaffold CV the ensemble's mean is RMSE 0.521, MAE 0.360, R² 0.691. T
 
 The Chemprop checkpoints are what is reproduced; TabPFN and the ensemble are refit from them.
 
-**1. The three `grid_*_chem` families** (exact; from `scripts/run_model_grid.sh`). CheMeleon init, MAE loss,
-seeds 0 1 2:
+**1. The three `grid_*_chem` families.** CheMeleon init, MAE loss, seeds 0 1 2, one `train-model` call
+(`--model chemeleon` is chemprop started from the CheMeleon weights):
 
 ```bash
 export CHEMPROP_HOME=.chemeleon
-SEEDS="0 1 2" ONLY="admet_chemeleon aux_chemeleon both_chemeleon" bash scripts/run_model_grid.sh
-# or on SCC:
-qsub -v SEEDS="0 1 2",ONLY="admet_chemeleon aux_chemeleon both_chemeleon" scripts/model_grid.qsub
+ADMET="tdc_hlm tdc_rlm expansionrx tdc_clearance_microsome_az tdc_half_life_obach tdc_cyp2c9_substrate tdc_cyp2d6_substrate tdc_cyp3a4_substrate"
+AUX="pubchem chembl bindingdb tdi single_conc"
+
+train-model --model chemeleon --loss-function mae --metrics mae rmse --show-individual-scores \
+  --seeds 0 1 2 \
+  --datasets challenge $ADMET \
+  --datasets challenge $AUX \
+  --datasets challenge $ADMET $AUX \
+  --output-dir results/chemprop/grid_chem
+# or on SCC (extra args pass through to train-model):
+qsub scripts/train_model.qsub --model chemeleon --loss-function mae --seeds 0 1 2 \
+  --datasets challenge $ADMET --datasets challenge $AUX --datasets challenge $ADMET $AUX \
+  --output-dir results/chemprop/grid_chem
 ```
 
-Output: `results/chemprop/grid/{admet,aux,both}_chemeleon/seed{0,1,2}/`.
+The three configurations, all with the challenge heads:
 
-**2. `huber_soft` and `mae_admet`.** The recipes below come from the run names and the `train-model` flags; the
-repository does not record the dataset arguments used for these runs, so set `--datasets` to the config you
-trained on. Run each recipe three times to get the three batches (`_`, `_2`, `_3`):
+| Family | Data besides the challenge heads | Merged |
+|---|---|---|
+| `grid_adme_chem` | HLM, RLM, ExpansionRx CLint, AZ clearance, half-life, 3 CYP substrate sets | 20,489 molecules, 13 heads (5 binary) |
+| `grid_aux_chem` | PubChem, ChEMBL, BindingDB, TDI, single-concentration | 39,575 molecules, 62 heads |
+| `grid_both_chem` | both of the above | |
+
+Output: one `results/chemprop/grid_chem/<config>/seed{0,1,2}/` per config, in the order given.
+
+**2. `huber_soft` and `mae_admet`.** Chemprop, 60 epochs, seeds 0 1 2, trained on the challenge labels plus
+three auxiliary configurations. Each configuration is one batch of three seeds: `_` is the first, `_2` the
+second, `_3` the third.
 
 ```bash
+CFG1="--datasets challenge pubchem:CYP1A2 chembl:CYP1A2 bindingdb:CYP1A2,CYP2C8"
+CFG2="--datasets challenge pubchem:CYP1A2,CYP2C9 chembl:CYP1A1,CYP2B6 bindingdb:CYP2C8,CYP1A1,CYP2B6"
+CFG3="--datasets challenge pubchem:CYP1A2,CYP2D6 chembl:CYP1A2,CYP2D6 bindingdb:CYP1A2,CYP2D6,CYP2C8"
+
 # huber_soft: Huber loss plus soft labels (label noise and shrink)
-train-model --model chemprop --epochs 60 --n-seeds 3 --seed 0 \
-  --loss-function huber --huber-delta 0.5 --label-noise 0.2 --label-shrink 0.1 \
-  --datasets admet --output-dir results/chemprop/huber_soft
+qsub -N cyp_huber_soft -o cyp_huber_soft.qlog scripts/train_model.qsub --model chemprop --epochs 60 \
+  --n-seeds 3 --seed 0 --loss-function huber --huber-delta 0.5 --label-noise 0.2 --label-shrink 0.1 \
+  --output-dir results/chemprop_12/huber_soft $CFG1 $CFG2 $CFG3
 
-# mae_admet: MAE loss on the ADMET data
-train-model --model chemprop --epochs 60 --n-seeds 3 --seed 0 \
-  --loss-function mae --datasets admet --output-dir results/chemprop/mae_admet
+# mae_admet: MAE loss
+qsub -N cyp_mae -o cyp_mae.qlog scripts/train_model.qsub --model chemprop --epochs 60 \
+  --n-seeds 3 --seed 0 --loss-function mae \
+  --output-dir results/chemprop_12/mae $CFG1 $CFG2 $CFG3
 ```
-
-Checkpoints trained with `--loss-function huber` need `models.chemprop_losses` importable to load (fixed in
-commit `b181e36`; use a checkout that includes it).
 
 **3. Build the feature caches.** This runs each encoder over the train and test molecules:
 
@@ -121,11 +141,52 @@ evaluate-models \
   --input 'chemprop[mae_admet_0_3]' 'chemprop[mae_admet_1_3]' 'chemprop[mae_admet_2_3]' \
   --models tabpfn --split blind_matched --seed 42 \
   --nfolds 3 --cv-split scaffold --cv-filter r2 RAE \
-  --ensemble caruana --correlation
+  --ensemble caruana --correlation --predict-blind --predictions-out results/final.csv
 ```
 
-Add `--predict-blind --predictions-out <file>` to write predictions for the blinded test set.
+## Pharmacophores
 
-`--split blind_matched` exists on branch `feat/blind-matched-split` (commit `a7a8158`) and is not yet in
-`main`. Run the final command from a checkout that has it. On a GPU node, TabPFN needs a torch build that
-supports the GPU (the Blackwell cards are not supported by torch 2.5.1).
+Five pharmacophore feature blocks were built and tested as additions to the RDKit descriptors. Four are
+hand-written SMARTS or descriptor blocks (`src/representations/cyp_pharmacophore.py`); the fifth is a mechanistic
+block ported from another team (`src/representations/cyp_mech.py`). Every motif and descriptor carries a
+literature source, and the motif list was fixed before any validation scores were seen. The full motif table
+with SMARTS, sources and train/test prevalence is in `reports/pharmacophore_features.md`.
+
+| `--input` | Features | What it encodes |
+|---|---:|---|
+| `cyp_heme_v2` | 13 | Heme-coordination motifs: counts of heme-ligating nitrogens (imidazole, 1,2,4- and 1,2,3-triazole, tetrazole, pyridine, pyrimidine, thiazole, oxazole), total, hindered and unhindered donor nitrogens, and primary and basic aliphatic amines |
+| `cyp_tdi_v2` | 6 | Mechanism-based inactivation alerts: methylenedioxyphenyl, terminal alkyne, furan, thiophene, hydrazine, tertiary alkylamine |
+| `cyp_isoform_v2` | 10 | Isoform-preference descriptors: basic amine count (CYP2D6), acidic group count (CYP2C9), aromatic ring count and fraction (CYP1A2), fraction Csp3, molecular weight (CYP3A4), cLogP, TPSA, H-bond acceptors and donors |
+| `erg` | 315 | RDKit ErG pharmacophore fingerprint at library defaults, the off-the-shelf comparator for the hand-written blocks |
+| `cyp_mech_v1` | 30 | Mechanistic block: 16 functional-group counts (amine classes, amidine, guanidine, pyridine and imidazole nitrogen, morpholine, piperazine, piperidine, carboxylic acid, tetrazole, sulfonamide), 8 protonation-state columns (rule-based pKa of the most basic centre, fraction protonated at pH 7.4, net charge, cation and anion counts), and 6 basic-nitrogen-to-aryl geometry columns including the CYP2D6 pharmacophore flags |
+
+### Sources
+
+- **Heme coordination:** Monk et al. 2020 (azoles), Mohamed et al. 2023 (pyridine and imidazole ligands),
+  Podgorski et al. 2020 and Perrin et al. 2009 (steric accessibility of the donor nitrogen). Pyrimidine, thiazole
+  and oxazole are extrapolations from those sources and are marked unvalidated in the motif table.
+- **Inactivation alerts:** Mao 2025, Mirzaei et al. 2021, Dang et al. 2017.
+- **Isoform descriptors:** Paine et al. 2003 (CYP2D6), Wester et al. 2004 (CYP2C9), Sansen et al. 2007 (CYP1A2),
+  Yano et al. 2004 (CYP3A4), Steyn et al. 2020 and Kiani et al. 2019 (lipophilicity, size, H-bonding).
+- **`cyp_mech_v1`:** ported from the Lizard Wizard Gizzard team's open-code CYP Challenge submission,
+  [doctawho42/CYPChallenge](https://github.com/doctawho42/CYPChallenge) (MIT License, Copyright (c) 2026 the
+  CYPChallenge contributors), at commit `bf018b8`. The SMARTS tables, pKa class table and penalty weights, column
+  definitions and their grouping are theirs; here they are adapted to the `Representation` interface. See
+  `THIRD_PARTY_NOTICES.md`.
+
+### Comparison against base RDKit
+
+Each block was added to the RDKit descriptors and fitted with XGBoost, against RDKit alone. The last group stacks
+the three hand-written SMARTS blocks. Features within one `--input` group are concatenated, and each group is
+scored on its own:
+
+```bash
+evaluate-models --models xgboost --nseeds 3 --sort-by RMSE \
+  --input rdkit \
+  --input rdkit cyp_heme_v2 \
+  --input rdkit cyp_tdi_v2 \
+  --input rdkit cyp_isoform_v2 \
+  --input rdkit erg \
+  --input rdkit cyp_mech_v1 \
+  --input rdkit cyp_heme_v2 cyp_tdi_v2 cyp_isoform_v2
+```

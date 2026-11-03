@@ -28,6 +28,6 @@ fi
 # Extra args pass through to train-model (--model chemprop|chemeleon|unimol). One model is trained per
 # (--datasets config x --learning-rate x seed):
 #   qsub scripts/train_model.qsub --model unimol --n-seeds 3 --learning-rate 5e-5 2e-4 5e-4 \
-#        --datasets admet --datasets admet pubchem:CYP1A2 --datasets pubchem:CYP1A2
-#   qsub scripts/train_model.qsub --model chemeleon --datasets admet pubchem:CYP1A2 --loss-function mae
+#        --datasets challenge --datasets challenge pubchem:CYP1A2 --datasets pubchem:CYP1A2
+#   qsub scripts/train_model.qsub --model chemeleon --datasets challenge pubchem:CYP1A2 --loss-function mae
 train-model "$@"

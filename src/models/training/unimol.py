@@ -1,4 +1,4 @@
-"""Uni-Mol backend: fine-tune jointly on the ADMET data plus any auxiliary datasets.
+"""Uni-Mol backend: fine-tune jointly on the listed datasets.
 
 One model per (learning rate, seed) with every head at once. Missing labels are
 masked in the loss (unimol_tools' multilabel_regression uses a NaN-masked MAE),
@@ -73,7 +73,7 @@ class UnimolBackend(Backend):
         output_dir = base_dir / f"lr_{args.learning_rate}_seed_{args.seed}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"Datasets: {', '.join(datasets) or 'ADMET only'}")
+        print(f"Datasets: {', '.join(datasets) or 'none'}")
         print(f"Heads: {len(target_columns)} ({len(eval_map)} scored)")
         print(f"Training molecules: {len(train_df)}")
         print(f"Validation molecules: {len(val_df)}")

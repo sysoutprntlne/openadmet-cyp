@@ -5,6 +5,7 @@ from typing import ClassVar
 import numpy as np
 
 from models.base import CYPModel
+from models.device import resolve_device
 
 
 class XGBoost(CYPModel):
@@ -19,6 +20,7 @@ class XGBoost(CYPModel):
         max_depth: int = 6,
         random_state: int = 42,
         n_jobs: int = 1,
+        device: str = "auto",
     ) -> None:
         from xgboost import XGBRegressor
 
@@ -29,7 +31,7 @@ class XGBoost(CYPModel):
             objective="reg:squarederror",
             booster="gbtree",
             tree_method="hist",
-            device="cpu",
+            device=resolve_device(device),
             subsample=1.0,
             colsample_bytree=1.0,
             random_state=random_state,

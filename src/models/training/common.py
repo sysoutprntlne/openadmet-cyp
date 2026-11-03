@@ -37,7 +37,14 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--list-datasets", action="store_true", help="List selectable datasets and exit")
     parser.add_argument("--data-dir", type=Path, default=Path("data"), help="Where the source CSVs live (default: data)")
-    parser.add_argument("--split-strategy", default="scaffold", choices=["scaffold", "butina", "random"])
+    parser.add_argument(
+        "--split-strategy",
+        default="scaffold",
+        choices=["scaffold", "butina", "random", "blind_matched"],
+        help="How to hold out val/test. 'scaffold' is the pinned default every recorded result "
+        "uses; 'blind_matched' instead makes the held-out slices imitate the blind set's regime "
+        "(see data_tools.split_column), which scores about 0.03 lower and is not comparable to it.",
+    )
     parser.add_argument("--split-seed", type=int, default=0, help="Seed for the merged table's split (default: 0)")
     parser.add_argument(
         "--target-columns",

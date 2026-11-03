@@ -130,3 +130,31 @@ def test_clint_is_log_scaled(data_dir):
 def test_specs_can_omit_challenge():
     assert parse_dataset_specs(["tdi"], with_challenge=False) == {"tdi": None}
     assert list(parse_dataset_specs(["tdi"])) == ["challenge", "tdi"]
+
+
+def test_blind_matched_strategy_uses_the_blind_set_as_its_reference(data_dir):
+    """The held-out slices imitate data/test.csv instead of holding out whole scaffolds."""
+    test_path = data_dir / "blind.csv"
+    pl.DataFrame({"Molecule_Name": ["OCNT-9", "OCNT-10"], "SMILES": [TOLUENE, PHENOL]}).write_csv(
+        test_path
+    )
+    table, _, _, _ = merge(
+        parse_dataset_specs([]),
+        data_dir=data_dir,
+        test_path=test_path,
+        split_strategy="blind_matched",
+        val_fraction=0.34,
+        test_fraction=0.34,
+    )
+    assert "split" in table.columns
+    assert set(table["split"].to_list()) <= {"train", "val", "test"}
+
+
+def test_blind_matched_strategy_requires_a_reference(data_dir):
+    with pytest.raises(ValueError, match="needs the blind set as its reference"):
+        merge(
+            parse_dataset_specs([]),
+            data_dir=data_dir,
+            test_path=None,
+            split_strategy="blind_matched",
+        )

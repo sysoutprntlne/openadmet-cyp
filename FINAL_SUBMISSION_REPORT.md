@@ -8,10 +8,12 @@ The only foundation-style models in the final submission are **Chemprop D-MPNN e
 ourselves** (some started from the published CheMeleon weights). They are not used as predictors. Each
 encoder turns a molecule into a feature vector, and a **TabPFN** regressor fits on those features. The
 TabPFN models are then combined with a **Caruana** ensemble. No Uni-Mol encoder and no standalone CheMeleon
-encoder made the cut.
+encoder made the cut. Finetuned Uni-Mol embeddings improved scaffold split performance but this did not translate
+to blind set performance.
 
 Source of every number below: `final_training_run.txt` (validation split `blind_matched`, seed 42, plus
-3-fold scaffold CV on the training portion).
+3-fold scaffold CV on the training portion). Blind matched was tried due to this [report](https://arnab28122000.github.io/openadmet-cyp-challenge/) by talindrew and the disconnect between scaffold
+split results and the blind set results.
 
 ### What made the cut
 
@@ -214,3 +216,7 @@ Scaffold split, seed 42, three XGBoost seeds averaged. Validation sizes are 320 
 - `cyp_tdi_v2` targets time-dependent inhibition and adds nothing on the direct-inhibition heads, as expected.
   `cyp_isoform_v2` is worse than base RDKit on CYP1A2 and CYP3A4 equal on CYP2C9 and slightly better on CYP2D6 (0.846 against 0.857).
 - Averaging all seven inputs gives the lowest mean RMSE (0.792) and highest R² (0.257).
+
+### Thank You!
+
+Thank you to Pat Walters and the OpenAdmet team for organizing the datathon. Thank you to the participants who open sourced their submission. Our team is mostly undergraduates and this has been a great opportunity to learn!

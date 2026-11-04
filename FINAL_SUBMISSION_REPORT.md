@@ -190,3 +190,27 @@ evaluate-models --models xgboost --nseeds 3 --sort-by RMSE \
   --input rdkit cyp_mech_v1 \
   --input rdkit cyp_heme_v2 cyp_tdi_v2 cyp_isoform_v2
 ```
+
+Scaffold split, seed 42, three XGBoost seeds averaged. Validation sizes are 320 (CYP1A2), 252 (CYP2C9), 287
+(CYP2D6) and 467 (CYP3A4) molecules. RMSE, lower is better:
+
+| Input | CYP1A2 | CYP2C9 | CYP2D6 | CYP3A4 | Mean RMSE | Mean R² | Mean ρ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `rdkit` (base) | 0.955 | 0.670 | 0.857 | **0.757** | 0.810 | 0.220 | 0.508 |
+| `rdkit` + `cyp_heme_v2` | 0.942 | 0.661 | **0.816** | 0.759 | **0.794** | 0.252 | 0.538 |
+| `rdkit` + `cyp_tdi_v2` | 0.956 | 0.673 | 0.846 | 0.767 | 0.810 | 0.220 | 0.512 |
+| `rdkit` + `cyp_isoform_v2` | 0.966 | 0.669 | 0.846 | 0.770 | 0.813 | 0.217 | 0.507 |
+| `rdkit` + `erg` | **0.929** | **0.653** | 0.834 | 0.770 | 0.796 | 0.250 | 0.530 |
+| `rdkit` + `cyp_mech_v1` | 0.942 | **0.653** | 0.825 | 0.761 | 0.796 | 0.251 | 0.531 |
+| `rdkit` + heme + tdi + isoform | 0.952 | 0.656 | 0.824 | 0.760 | 0.798 | 0.246 | 0.532 |
+| average of all seven | 0.940 | 0.655 | 0.817 | 0.756 | 0.792 | 0.257 | 0.537 |
+
+- Four blocks improve on base RDKit: `cyp_heme_v2` (mean RMSE 0.794 against 0.810), `cyp_mech_v1` and `erg` (0.796
+  each) and the three stacked SMARTS blocks (0.798). `cyp_tdi_v2` and `cyp_isoform_v2` do not (0.810 and 0.813).
+- `cyp_heme_v2`, 13 hand-written features, matches the 315-feature ErG fingerprint on the mean and has the best
+  CYP2D6 result of any single block (0.816 against 0.857 for base RDKit). ErG is best on CYP1A2 and CYP2C9.
+- The gain is concentrated in CYP2D6 (up to 0.04 RMSE) and CYP1A2 (up to 0.03). CYP3A4 does not benefit: base
+  RDKit has the best CYP3A4 RMSE of the single inputs (0.757) and every block is at or above it.
+- `cyp_tdi_v2` targets time-dependent inhibition and adds nothing on the direct-inhibition heads, as expected.
+  `cyp_isoform_v2` is worse than base RDKit on CYP1A2 and CYP3A4 equal on CYP2C9 and slightly better on CYP2D6 (0.846 against 0.857).
+- Averaging all seven inputs gives the lowest mean RMSE (0.792) and highest R² (0.257).

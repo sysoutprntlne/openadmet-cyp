@@ -5,6 +5,7 @@ checkpoint and uses it to fingerprint SMILES into 2048-dim embeddings.
 Reference: https://github.com/JacksonBurns/chemeleon (chemeleon_fingerprint.py)
 """
 
+import os
 from pathlib import Path
 from typing import ClassVar
 from urllib.request import urlretrieve
@@ -17,7 +18,9 @@ from tqdm import tqdm
 from representations.base import Representation
 
 _CHECKPOINT_URL = "https://zenodo.org/records/15460715/files/chemeleon_mp.pt"
-_CHECKPOINT_DIR = Path.home() / ".chemprop"
+# Relative to the working directory, like data/features, so it lands on project
+# storage rather than a quota-limited home. Override with CHEMPROP_HOME.
+_CHECKPOINT_DIR = Path(os.environ.get("CHEMPROP_HOME") or ".chemeleon")
 _CHECKPOINT_PATH = _CHECKPOINT_DIR / "chemeleon_mp.pt"
 _OUTPUT_DIM = 2048
 _BATCH_SIZE = 256
@@ -30,7 +33,7 @@ def _load_model():
     from chemprop.models import MPNN
     from chemprop.nn import RegressionFFN
 
-    _CHECKPOINT_DIR.mkdir(exist_ok=True)
+    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     if not _CHECKPOINT_PATH.exists():
         urlretrieve(_CHECKPOINT_URL, _CHECKPOINT_PATH)
 

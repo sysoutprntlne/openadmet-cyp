@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#$ -P buaisociety
+#$ -N foundation-representations
+#$ -j y
+#$ -o foundation_representations.qlog
+#$ -l h_rt=1:00:00
+#$ -l gpus=1
+#$ -l gpu_c=9.0               # keep: older GPUs lack kernels for our torch build
+#$ -pe omp 4
+
+module load miniconda
+conda activate cyp
+
+foundation-model --generate-cache

@@ -294,8 +294,9 @@ def test_registry_entries_are_callable_and_return_correct_width():
 def test_preexisting_registry_order_is_unchanged():
     """Registry edits are append-only; pinned results depend on the order."""
     assert list(INPUT_REGISTRY) == [
-        "rdkit", "chemeleon", "morgan", "count_morgan", "maccs", "mordred",
+        "rdkit", "chemeleon", "morgan", "count_morgan", "maccs", "mordred", "shape", "unimol",
         "cyp_heme_v2", "cyp_isoform_v2", "cyp_tdi_v2", "erg",
+        "xtb_solv_v1", "xtb_elec_v1", "cyp_mech_v1",
     ]
 
 

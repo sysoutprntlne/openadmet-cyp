@@ -7,7 +7,6 @@ by how much data is available, and writes a train_chemprop-ready CSV
 before fine-tuning/transferring to the CYP isoforms in this challenge.
 """
 
-import argparse
 import json
 import math
 import re
@@ -217,35 +216,3 @@ def write_datasets(
 
     (output_dir / "manifest.csv").write_text("\n".join(manifest_rows) + "\n")
     return selected
-
-
-def main() -> None:
-    """Entry point for the build-family-datasets CLI."""
-    parser = argparse.ArgumentParser(
-        description="Fetch ChEMBL + BindingDB affinity data for the cytochrome P450 superfamily "
-        "(Pfam PF00067) and write per-protein train_chemprop-ready CSVs for the top-N by data volume.",
-    )
-    parser.add_argument("--pfam-id", default=_DEFAULT_PFAM_ID, help=f"Pfam family id (default: {_DEFAULT_PFAM_ID})")
-    parser.add_argument("--top-n", type=int, default=_DEFAULT_TOP_N, help=f"Number of proteins to keep (default: {_DEFAULT_TOP_N})")
-    parser.add_argument(
-        "--min-records", type=int, default=_DEFAULT_MIN_RECORDS, help=f"Skip proteins with fewer records (default: {_DEFAULT_MIN_RECORDS})"
-    )
-    parser.add_argument(
-        "--bindingdb-cutoff-nm",
-        type=float,
-        default=_DEFAULT_BINDINGDB_CUTOFF_NM,
-        help=f"Max BindingDB affinity value (nM) to include (default: {_DEFAULT_BINDINGDB_CUTOFF_NM})",
-    )
-    parser.add_argument("--max-workers", type=int, default=_DEFAULT_MAX_WORKERS, help="Parallel HTTP workers (default: 8)")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/families"), help="Output directory (default: data/families)")
-    args = parser.parse_args()
-
-    targets = collect_family_targets(args.pfam_id, args.bindingdb_cutoff_nm, args.max_workers)
-    selected = write_datasets(targets, args.output_dir, args.top_n, args.min_records)
-
-    print(f"Wrote {len(selected)} protein datasets -> {args.output_dir}/", file=sys.stderr)
-    print(f"Manifest -> {args.output_dir / 'manifest.csv'}", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()

@@ -23,6 +23,10 @@ confidential/
 *submission*.tar
 *submission*.tar.gz
 
+# Local foundation-model path aliases
+foundation-path-alias.csv
+data-alias.csv
+
 # Cached features and serialized models, including custom output locations
 *.npy
 *.npz
@@ -70,3 +74,7 @@ __pycache__/
 
 # Stray model checkpoints (literal ~ dir)
 /~/
+.chemeleon/
+
+# unimol_tools run logs
+logs/

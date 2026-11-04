@@ -1,0 +1,23 @@
+#!/bin/bash -l
+#$ -P buaisociety
+#$ -N model_grid
+#$ -j y
+#$ -o model_grid.qlog
+#$ -l h_rt=12:00:00
+#$ -l gpus=1
+#$ -l gpu_c=9.0               # keep: older GPUs lack kernels for our torch build
+#$ -pe omp 4
+
+module load miniconda
+conda activate cyp
+
+export CHEMPROP_HOME='.chemeleon'
+cd "$SGE_O_WORKDIR"
+
+# Finished runs are skipped, so a job that hits h_rt can just be resubmitted.
+# Split the work across jobs by seed or by model:
+#   qsub -v SEEDS="0" scripts/model_grid.qsub
+#   qsub -v SEEDS="1 2",ONLY="both_scratch both_chemeleon" scripts/model_grid.qsub
+# Extra args pass through to every train-chemprop run:
+#   qsub scripts/model_grid.qsub --epochs 30
+bash scripts/run_model_grid.sh "$@"

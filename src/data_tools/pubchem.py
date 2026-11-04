@@ -23,7 +23,6 @@ As separate heads the shared encoder learns from them and each head keeps
 its own scale.
 """
 
-import argparse
 import csv
 import sys
 from pathlib import Path
@@ -46,8 +45,6 @@ _PANEL_TO_ISOFORM = {
     "p450-cyp3a4": "CYP3A4",
 }
 
-_DEFAULT_RAW = Path("data/pubchem_aid1851_raw.csv")
-_DEFAULT_OUT = Path("data/pubchem_aid1851.csv")
 _TIMEOUT_S = 600
 
 
@@ -175,28 +172,3 @@ def write_csv(fieldnames: list[str], rows: list[dict], dest: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
     print(f"Wrote {len(rows)} rows x {len(fieldnames)} cols -> {dest}", file=sys.stderr)
-
-
-def main() -> None:
-    """Entry point for the build-pubchem-aux CLI."""
-    parser = argparse.ArgumentParser(
-        description="Download PubChem AID 1851 (Veith CYP qHTS panel) and reshape it into "
-        "per-isoform auxiliary heads (percent inhibition + fitted pIC50).",
-    )
-    parser.add_argument("--raw-path", type=Path, default=_DEFAULT_RAW, help=f"Raw CSV cache (default: {_DEFAULT_RAW})")
-    parser.add_argument("--output-path", type=Path, default=_DEFAULT_OUT, help=f"Reshaped output (default: {_DEFAULT_OUT})")
-    parser.add_argument("--force-download", action="store_true", help="Re-download even if the raw CSV exists")
-    parser.add_argument(
-        "--drop-inconclusive",
-        action="store_true",
-        help="Drop rows PubChem flagged Inconclusive (default: keep them; their max_response is still measured)",
-    )
-    args = parser.parse_args()
-
-    raw_path = download_raw(args.raw_path, force=args.force_download)
-    fieldnames, rows = reshape(raw_path, keep_inconclusive=not args.drop_inconclusive)
-    write_csv(fieldnames, rows, args.output_path)
-
-
-if __name__ == "__main__":
-    main()

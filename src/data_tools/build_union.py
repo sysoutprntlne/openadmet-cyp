@@ -180,7 +180,7 @@ def main() -> None:
         name, _, path_text = spec.partition("=")
         path = Path(path_text)
         if not path.exists():
-            print(f"Missing auxiliary file: {path} (run build-pubchem-aux first?)", file=sys.stderr)
+            print(f"Missing auxiliary file: {path} (run `data fetch pubchem_aid1851` first?)", file=sys.stderr)
             sys.exit(1)
         auxiliary_paths[name] = path
 

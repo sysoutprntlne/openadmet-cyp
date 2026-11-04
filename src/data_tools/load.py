@@ -4,7 +4,10 @@ import random
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import polars as pl
+
+from data_tools.split_column import _SCORED_DEFAULT, _butina_groups, _scaffold_groups, assign_blindlike_splits
 
 _DEFAULT_DATA_DIR = Path("data")
 
@@ -140,9 +143,32 @@ def _butina_split(
     return df[train_indices], df[val_indices]
 
 
+def _blind_matched_split(
+    df: pl.DataFrame, val_fraction: float, seed: int, test_path: Path
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Hold out a slice whose regime imitates the blind set (data/test.csv)."""
+    if not test_path.exists():
+        raise ValueError(
+            f"split_type='blind_matched' needs the blind set as its reference; {test_path} is missing"
+        )
+    reference = pl.read_csv(test_path, infer_schema_length=_INFER_ALL)["SMILES"].to_list()
+    splits, _ = assign_blindlike_splits(
+        df,
+        _SCORED_DEFAULT,
+        reference,
+        val_fraction=val_fraction,
+        test_fraction=0.0,
+        seed=seed,
+    )
+    held_out = (splits != "train").to_list()
+    train_idx = [i for i, h in enumerate(held_out) if not h]
+    val_idx = [i for i, h in enumerate(held_out) if h]
+    return df[train_idx], df[val_idx]
+
+
 def load_data(
     *,
-    split_type: Literal["random", "scaffold", "butina"] = "random",
+    split_type: Literal["random", "scaffold", "butina", "blind_matched"] = "random",
     val_fraction: float = 0.2,
     seed: int = 42,
     butina_cutoff: float = 0.4,
@@ -154,6 +180,8 @@ def load_data(
       'random'   — seeded random split (default)
       'scaffold' — Bemis-Murcko scaffold split; no scaffold leakage
       'butina'   — Butina/Taylor cluster split on Morgan fps; no similar molecules span both splits
+      'blind_matched' — held-out slice imitates data/test.csv (75% novel scaffolds, close to train);
+                        scores ~0.013 lower than 'scaffold' and is not comparable to it
     """
     df = load_train(data_dir / _TRAIN_FILE)
 
@@ -161,4 +189,46 @@ def load_data(
         return _scaffold_split(df, val_fraction, seed)
     if split_type == "butina":
         return _butina_split(df, val_fraction, seed, butina_cutoff)
+    if split_type == "blind_matched":
+        return _blind_matched_split(df, val_fraction, seed, data_dir / _TEST_FILE)
     return _random_split(df, val_fraction, seed)
+
+
+def cv_folds(
+    df: pl.DataFrame,
+    *,
+    n_folds: int,
+    split_type: Literal["random", "scaffold", "butina"] = "random",
+    seed: int = 42,
+    butina_cutoff: float = 0.4,
+) -> np.ndarray:
+    """Return a fold index in [0, n_folds) for each row of df.
+
+    'scaffold' and 'butina' keep each scaffold family / cluster inside one fold;
+    'random' assigns rows independently. Groups are placed largest-first into the
+    currently smallest fold, so fold sizes stay balanced.
+    """
+    if n_folds < 2:
+        raise ValueError(f"n_folds must be >= 2, got {n_folds}")
+
+    smiles = df["SMILES"].to_list()
+    if split_type == "scaffold":
+        groups = list(_scaffold_groups(smiles).values())
+    elif split_type == "butina":
+        groups = list(_butina_groups(smiles, butina_cutoff).values())
+    else:
+        groups = [[idx] for idx in range(len(smiles))]
+
+    if len(groups) < n_folds:
+        raise ValueError(f"Only {len(groups)} {split_type} groups for {n_folds} folds")
+
+    random.Random(seed).shuffle(groups)
+    groups.sort(key=len, reverse=True)
+
+    fold_sizes = [0] * n_folds
+    folds = np.empty(len(smiles), dtype=int)
+    for rows in groups:
+        fold = min(range(n_folds), key=fold_sizes.__getitem__)
+        folds[rows] = fold
+        fold_sizes[fold] += len(rows)
+    return folds

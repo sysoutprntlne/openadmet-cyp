@@ -1,6 +1,6 @@
 # Workstream Manifest — Round 2
 
-Four tasks, written after round 1 landed `INPUT_REGISTRY`'s six featurizers and
+Five tasks, written after round 1 landed `INPUT_REGISTRY`'s six featurizers and
 the auxiliary-head search. Read `tasks/round1/MANIFEST.md` first — **its shared
 contract still governs everything here** (metric, pinned split, join keys,
 seed-noise floor). This file adds only what is specific to round 2.
@@ -41,6 +41,12 @@ are still open are listed below so nobody picks up work that is already claimed.
       speculation. *Blocked on the
       evaluation harness below, and on Denali standing up the container and the
       model server.*
+- [ ] **[R5 — BioEmu-2 conformational-switch features](bioemu-switch-features.md)**
+      Check that ligand-conditioned BioEmu-2 ensembles match Amber MD (5
+      inhibitors + 5 non-inhibitors per isoform, apo MD as comparator), then run
+      it on every molecule and extract switch features. Feature list deliberately
+      left open until simulations exist. Two gates; a null at either is a result.
+      *Soft dep on T5/T6. Heavy GPU — SCC.*
 
 **Start R1 first.** It is the only task that can invalidate the shared
 contract: if a better recipe changes the `0.7557` / `0.7193` reference numbers,
